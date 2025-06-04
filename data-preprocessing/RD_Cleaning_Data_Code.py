@@ -4,7 +4,7 @@ June 2025
 Pytohn 3.13
 
 
-This code is meant to clean the data collected from the NLSY79 survey. The data is accessible in a .dta file. 
+This code is meant to clean the data collected from the NLSY79 survey. It is meant to run in the base directory of the project. 
 
 This code creates a child-by-period panel, where each data point represents a variable for a child in a specific period. Each period corresponds to an age range of the child. The periods are as follows: 
 Period 0: age 0-5 (label: pre-elementary)
@@ -41,11 +41,11 @@ from wakepy import keep
 # CONSTANTS
 
 # File paths
-nan_file_path = 'nan_columns.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'child_age_panel.csv'
-period_output_file_path = 'child_period_panel.csv'  # File to save the child by period data
-nls_file_path = '06-04-11am-renamed.csv'  # Update this path as needed
-MISSING_VALUE_CODE = -10  # Code for missing values
+nan_file_path = 'data-preprocessing/nan_columns.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/child_age_panel.csv'
+period_output_file_path = 'data-preprocessing/child_period_panel.csv'  # File to save the child by period data
+nls_file_path = 'data-preprocessing/06-04-11am-renamed.csv'  # Update this path as needed
+
 age_periods = {
     0: (0, 5), # Pre-elementary
     1: (6, 9), # Elementary
@@ -54,7 +54,9 @@ age_periods = {
 }
 
 # List of special columns that need to be handled separately
-special_columns_excluding_dates = ['HGC_OF_MOTHER_AS_OF_MAY_1_R_', ]
+special_columns_excluding_dates = [
+    'HGC_OF_MOTHER_AS_OF_MAY_1_R_', 
+]
 
 
 # List of prefixes for columns that should be removed when naming columns
@@ -63,7 +65,8 @@ column_prefixes_to_remove = [
     'HOME_B_3_5_',
     'HOME_C_6_9_',
     'HOME_D_10_14_', 
-    'HOME_B_3YRS_', 
+    'HOME_B_3YRS_',
+    'HOME_C_4_5_' 
     'HOME_C_6_',
     'HOME_D_10_',
     'HOME_A_', 
@@ -75,6 +78,8 @@ column_prefixes_to_remove = [
 
 # Dictionary to map poorly-named columns to their intended names
 poorly_named_columns = {
+    'TYPE_OF_SCHOOL_94_': 'TYPE_OF_SCHOOL_',
+    'TYPE_OF_SCHOOL_96_': 'TYPE_OF_SCHOOL_',
     # TODO: Add any poorly named columns here, e.g. 'old_name': 'new_name'
     # This can be used for both renaming columns and for handling special cases
 }
@@ -312,6 +317,9 @@ with keep.running(): # Keep the script running to avoid premature termination
     #         new_data.loc[(new_data['id'] == id), 'mother_education_at_birth'] = value
     # else:
     #     raise ValueError("Column 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' not found in the data. Check the data.")
+
+
+    # TODO: pair the data with the regular NLSY79 data
 
     # Filter out rows where age > 19 and age < 0
     new_data = new_data[(new_data['age'] >= 0) & (new_data['age'] <= 19)]

@@ -7,7 +7,7 @@ Professor O'Connell, Michael Pham
 This code runs all other code files. Make sure to change the data paths to line up
 with where you saved them. 
 
-
+It is meant to run in the data-preprocessing directory of the project. 
 
 
 NOTE: you must edit the value-labels.do file every time you download a new dataset
@@ -24,7 +24,7 @@ section of the code (if not, this will result in saving non-numeric data)
 * Filepaths
 local nls_filepath = "06-04-10am" // REPLACE WITH YOUR DATA PATH
 local rename_variable_labels_filepath = "Rename_Names_To_Labels.do" // ALSO REPLACE
-local save_filepath = "06-04-11am-renamed.csv"
+local save_filepath = "06-04-12pm-renamed.csv"
 
 
 local dct_filepath = "`nls_filepath'/`nls_filepath'.dct"

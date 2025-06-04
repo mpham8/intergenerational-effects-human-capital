@@ -71,14 +71,13 @@ foreach var of local all_vars {
 	}
 	
 	if `is_numeric_4' == 1 {
-		local clean_label = substr("`lab'", 1, `lablen' - 4)
+		local lab = substr("`lab'", 1, `lablen' - 4)
 	}
 	else if `is_numeric_2' == 1 {
-		local clean_label = substr("`lab'", 1, `lablen' - 2)
+		local lab = substr("`lab'", 1, `lablen' - 2)
 	}
-	else {
-		local clean_label = "`lab'"
-	}
+	
+
 	
 	
 	
@@ -96,7 +95,7 @@ foreach var of local all_vars {
 // 	else if substr("`lab'", 1, 5) == "CHILD" {
 // 		local clean_label = substr("`lab'", 5, .)
 // 	}
-
+	local clean_label = "`lab'"
 	* Replace spaces and special characters with underscores
 	local clean_label = usubinstr("`clean_label'", " ", "_", .)
 	local clean_label = usubinstr("`clean_label'", "-", "_", .)
