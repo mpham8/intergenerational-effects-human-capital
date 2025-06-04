@@ -22,24 +22,40 @@ section of the code (if not, this will result in saving non-numeric data)
 */
 
 * Filepaths
-local nls_filepath = "06-04-10am" // REPLACE WITH YOUR DATA PATH
+local cnls_filepath = "06-04-10am" // REPLACE WITH YOUR DATA PATH
+local nls79_filepath = "06-04-mother-data-simplified"
 local rename_variable_labels_filepath = "Rename_Names_To_Labels.do" // ALSO REPLACE
-local save_filepath = "06-04-12pm-renamed.csv"
+local cnls_save_filepath = "06-04-12pm-renamed.csv"
+local nls79_save_filepath = "06-04-mother-data-simplified-renamed.csv"
 
 
-local dct_filepath = "`nls_filepath'/`nls_filepath'.dct"
-local rename_question_codes_filepath = "`nls_filepath'/`nls_filepath'-value-labels.do"
+local cnls_dct_filepath = "`cnls_filepath'/`cnls_filepath'.dct"
+local nls_rename_question_codes_filepath = "`cnls_filepath'/`cnls_filepath'-value-labels.do"
+local nls79_dct_filepath = "`nls79_filepath'/`nls79_filepath'.dct"
+local nls79_rename_question_codes_filepath = "`nls79_filepath'/`nls79_filepath'-value-labels.do"
 
 * Loading the data
 clear all
-infile using "`dct_filepath'"
+infile using "`cnls_dct_filepath'"
 
-
+* * FOR CNLS DATA
 * Renaming to question codes using code copied from the value-labels.do file
-do "`rename_question_codes_filepath'"
-
+do "`nls_rename_question_codes_filepath'"
 * Renaming to final version (modified variable labels) using custom code
 do "`rename_variable_labels_filepath'"
 
-* Save final file as a csv
-export delimited "`save_filepath'"
+
+* Save file as a csv
+export delimited "`cnls_save_filepath'"
+
+* Start over 
+clear all
+
+
+
+* * FOR NLS79 DATA
+* Renaming to question codes
+do "`nls79_rename_question_codes_filepath'"
+* Since question codes are much better for this dataset, we can simply save
+export delimited "`nls_79_save_filepath'"
+

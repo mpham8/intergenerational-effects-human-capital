@@ -1,4 +1,4 @@
-
+/*
 label define vlR0012200 0 "0"  1 "1 TO 13"  14 "14 TO 26"  27 "27 TO 39"  40 "40 TO 48"  49 "49 TO 51"  52 "52"  53 "53 TO 9999999: > 52" 
 label values R0012200 vlR0012200
 
@@ -565,12 +565,14 @@ label values T9900000 vlT9900000
 
 label define vlT9900100 1 "High school diploma (or equivalent)"  2 "Associate/Junior College (AA)"  3 "Bachelor of Arts Degree (BA)"  4 "Bachelor of Science (BS)"  5 "Master's Degree (MA, MBA, MS, MSW)"  6 "Doctoral Degree (PhD)"  7 "Professional Degree (MD, LLD, DDS)"  8 "Other (SPECIFY)" 
 label values T9900100 vlT9900100
+
+*/ 
 /* Crosswalk for Reference number & Question name
  * Uncomment and edit this RENAME statement to rename variables for ease of use.
  * This command does not guarantee uniqueness
  */
   /* *start* */
-/*
+
   rename R0000100 CASEID_1979 
   rename R0012200 MAR_10A_1979   // MAR-10A
   rename R0012300 MAR_10B_1979   // MAR-10B
@@ -774,7 +776,7 @@ label values T9900100 vlT9900100
   rename T9900000 HGC_EVER_XRND 
   rename T9900100 HIGHEST_DEGREE_EVER_XRND 
 
-*/
+
   /* *end* */  
 /* To convert variable names to lower case use the TOLOWER command 
  *      (type findit tolower and follow the links to install).
