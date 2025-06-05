@@ -42,9 +42,9 @@ from wakepy import keep
 # CONSTANTS
 
 # File paths
-nan_file_path = 'data-preprocessing/nan_columns_full.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel_full.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel_full.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
+period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
 nls_file_path = 'data-preprocessing/06-04-11am-renamed.csv'  # Update this path as needed
 
 age_periods = {
@@ -119,11 +119,8 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
         
         # If the column ends in "XRND," there is no specific date attached to it, and we can fill it in for all ages
         if column.endswith('XRND'):
-            for id in new_data['id']:
-                # Get the value for this id and column
-                value = nls_data[nls_data['id'] == id][column].values[0]
-                # Fill in the value for all ages
-                new_data.loc[new_data['id'] == id, column] = value
+            new_data[column] = np.repeat(nls_data[column].values, 20)  # Repeat the values for each age
+            
                 
         
         # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
@@ -171,7 +168,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 new_data[column_name] = np.nan
             
             
-
+            # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
             for id in new_data['id']:
 
                 # Get the value for this id and column
@@ -226,7 +223,7 @@ def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
                 # Interpolate values for the current column
                 filtered_column = period_df[column][period_df[column] >= 0]  # Filter out negative values
                 if filtered_column.isna().all():
-                    print(f"Warning: All values in column '{column}' are NaN for period {period}.")
+                    ...
                 # If the column has only one valid value, use that value for the period
                 elif len(filtered_column) == 1:
                     # Use the single value for the middle age
@@ -297,24 +294,15 @@ nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
 
 # FOR TESTING PURPOSES: shorten the data to only include a few rows
 
-# nls_data = nls_data.head(11000)  # Uncomment this line to limit the data for testing purposes
+nls_data = nls_data.head(100)  # Uncomment this line to limit the data for testing purposes
 
 
 
 # 2. Create the child by age panel
-
-
-# Reformatting the data to be a 2D DataFrame, with each row representing a child-age pair, and each column representing a variable
-
-
-
 with keep.running(): # Keep the script running to avoid premature termination
 
+    # Creating the basic panel, excluding special columns
     new_data = create_child_by_age_panel(nls_data)
-
-        
-        
-
 
 
 
