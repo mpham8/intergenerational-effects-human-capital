@@ -42,11 +42,19 @@ from wakepy import keep
 # CONSTANTS
 
 # File paths
+
+# Input files 
+nls_file_path = 'data-preprocessing/06-04-12pm-renamed.csv'  # Update this path as needed
+mother_data_file_path = 'data-preprocessing/06-04-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
+
+# Output files
 nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
 age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
 period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
 nls_file_path = 'data-preprocessing/06-04-11am-renamed.csv'  # Update this path as needed
 
+
+# Age periods dictionary
 age_periods = {
     0: (0, 5), # Pre-elementary
     1: (6, 9), # Elementary
@@ -77,10 +85,11 @@ column_prefixes_to_remove = [
     'CHECK_'
 ]
 
-# Dictionary to map poorly-named columns to their intended names
+# Dictionary to map poorly-named columns to their intended names (for CLNS79 data)
 poorly_named_columns = {
     'TYPE_OF_SCHOOL_94_': 'TYPE_OF_SCHOOL_',
     'TYPE_OF_SCHOOL_96_': 'TYPE_OF_SCHOOL_',
+    'SAMPLE_RACE_78SCRN': 'MOTHER_RACE_XRND',
     # TODO: Add any poorly named columns here, e.g. 'old_name': 'new_name'
     # This can be used for both renaming columns and for handling special cases
 }
@@ -105,10 +114,10 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     # | id | age | math_score | reading_score | ... |
 
     new_data = pd.DataFrame()
-    # Create the 'id' column such that it contains 20 unique child IDs for every child in the NLSY79 data (one for each age from 0 to 19)
-    new_data['id'] = np.repeat(nls_data['id'].unique(), 20)
+    # Create the 'id' column such that it contains 21 unique child IDs for every child in the NLSY79 data (one for each age from -1 to 19)
+    new_data['id'] = np.repeat(nls_data['id'].unique(), 21)
     # Create the 'age' column such that it contains the ages from 0 to 19 for each child
-    new_data['age'] = np.tile(np.arange(20), len(nls_data['id'].unique()))
+    new_data['age'] = np.tile(np.arange(21)-1, len(nls_data['id'].unique()))
 
     print(new_data.head())
     for column in nls_data.columns:
@@ -119,7 +128,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
         
         # If the column ends in "XRND," there is no specific date attached to it, and we can fill it in for all ages
         if column.endswith('XRND'):
-            new_data[column] = np.repeat(nls_data[column].values, 20)  # Repeat the values for each age
+            new_data[column] = np.repeat(nls_data[column].values, 21)  # Repeat the values for each age
             
                 
         
@@ -294,7 +303,7 @@ nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
 
 # FOR TESTING PURPOSES: shorten the data to only include a few rows
 
-nls_data = nls_data.head(100)  # Uncomment this line to limit the data for testing purposes
+nls_data = nls_data.head(50)  # Uncomment this line to limit the data for testing purposes
 
 
 
@@ -304,8 +313,7 @@ with keep.running(): # Keep the script running to avoid premature termination
     # Creating the basic panel, excluding special columns
     new_data = create_child_by_age_panel(nls_data)
 
-
-
+    
     # Handling the special columns (TODO)
 
     # HGC_OF_MOTHER_AS_OF_MAY_1_R_ is a special column, for which we want to only keep the value of the pre-birth age of the child (age -1)
@@ -328,9 +336,112 @@ with keep.running(): # Keep the script running to avoid premature termination
 
 
     # TODO: Combine the data with the regular NLSY79 data
+    try:
+        mother_data = pd.read_csv(mother_data_file_path)
+    except FileNotFoundError:
+        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+        raise
+    
+    mother_data = pd.DataFrame(mother_data)
+    
+    for column in mother_data.columns:
 
-    # Filter out rows where age > 19 and age < 0
-    new_data = new_data[(new_data['age'] >= 0) & (new_data['age'] <= 19)]
+        # Skip the 'id' column
+        if column == 'CASEID_1979':
+            continue
+            
+                
+        
+        # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
+        elif column[-4:].isdigit():  # Check if the last 4 characters are digits
+            year = int(column[-4:])
+
+            # Find the column name, removing the year part
+            column_name = column[:-4]
+
+            # Filter out unwanted prefixes from the column name
+            for prefix in column_prefixes_to_remove:
+                if column_name.startswith(prefix):
+                    print(f"Removing prefix '{prefix}' from column name: {column_name}")
+                    # Remove the prefix from the column name
+                    column_name = column_name[len(prefix):]
+
+            # If the column name is in the poorly named columns dictionary, rename it with the better name
+            if column_name in poorly_named_columns:
+                column_name = poorly_named_columns[column_name]
+            
+
+            # If the column name is in the special columns list, we will handle it separately
+            if column_name in special_columns_excluding_dates:
+                # print(f"Skipping special column: {column}")
+                continue
+
+
+            # # FOR TESTING PURPOSES: continue if not in the special columns for testing
+            # if column_name not in special_columns_for_testing:
+            #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
+            #     continue
+
+            
+
+            print(f"Processing column with year: {year}, base column name: {column_name}")
+            
+            
+            
+            
+
+            # Check if the column already exists in new_data
+            if column_name not in new_data.columns:
+                # If not, create it with NaN values
+                new_data[column_name] = np.nan
+            
+            
+            # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
+            for id in nls_data['id']:
+
+                # Get the relevant data
+                nls_data_id = nls_data[nls_data['id'] == id]
+                # Get the age of the child at that year
+                child_age = year - nls_data_id['CYRB_XRND'].values[0]
+                print(f"CNLSY79 mother ID: {nls_data_id['MPUBID_XRND']}")
+                # Get the value for this id and column from the mother data
+                value = mother_data[mother_data['CASEID_1979'] == nls_data_id['MPUBID_XRND'].values[0]][column].values[0]
+
+
+                # Fill in the value for the corresponding age
+                new_data.loc[(new_data['id'] == id) & (new_data['age'] == child_age), column_name] = value
+
+
+            # Ensure we have a pre-birth age (-1) value for each child for the column
+            if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
+                # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
+                # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
+                negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name].notna())]['age']
+                if not negative_ages.empty:
+                    greatest_negative_age = negative_ages.max()
+                    # Fill in the value for the corresponding age -1
+                    new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
+                else: 
+                    print(f"Warning: No negative ages found for id {id} in column {column_name}. Unable to fill in pre-birth age (-1) value.")
+
+        # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
+        else: 
+            # Put out a warning if column doesn't end with XRND
+            if not column.endswith("XRND"):
+                print(f"Column {column} does not end with 'XRND'. It will be added to all ages for each child.")
+            # Add the mother's XRND variable to all ages for each child
+            # First, map CASEID_1979 to id
+            mother_id = mother_data['CASEID_1979']
+            mother_col = mother_data[column]
+            # Create a mapping from CASEID_1979 to the column value
+            mother_map = dict(zip(mother_id, mother_col))
+            # Fill in the value for all ages for each child
+            new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
+
+
+
+    # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
+    new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
 
 
     # 2a. Running some checks on the new_data DataFrame and saving it to a new file
