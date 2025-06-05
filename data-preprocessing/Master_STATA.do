@@ -25,8 +25,8 @@ section of the code (if not, this will result in saving non-numeric data)
 local cnls_filepath = "06-04-10am" // REPLACE WITH YOUR DATA PATH
 local nls79_filepath = "06-04-mother-data-simplified"
 local rename_variable_labels_filepath = "Rename_Names_To_Labels.do" // ALSO REPLACE
-local cnls_save_filepath = "06-05-10am-renamed_TEST.csv"
-local nls79_save_filepath = "06-04-mother-simple-renamed.csv"
+local cnls_save_filepath = "06-05-7pm-renamed.csv"
+local nls79_save_filepath = "06-05-mother-simple-renamed.csv"
 
 
 local cnls_dct_filepath = "`cnls_filepath'/`cnls_filepath'.dct"
@@ -46,7 +46,7 @@ do "`rename_variable_labels_filepath'"
 
 
 * Save file as a csv
-* export delimited "`cnls_save_filepath'"
+export delimited "`cnls_save_filepath'"
 
 * Start over 
 clear all

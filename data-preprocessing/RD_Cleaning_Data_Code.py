@@ -44,8 +44,8 @@ from wakepy import keep
 # File paths
 
 # Input files 
-nls_file_path = 'data-preprocessing/06-04-12pm-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/06-04-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
+nls_file_path = 'data-preprocessing/06-05-5pm-renamed.csv'  # Update this path as needed
+mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
 
 # Output files
 nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
@@ -64,7 +64,7 @@ age_periods = {
 
 # List of special columns that need to be handled separately
 special_columns_excluding_dates = [
-    'HGC_OF_MOTHER_AS_OF_MAY_1_R_', 
+    'HGC_OF_MOTHER_AS_OF_MAY_1_R', 
 ]
 
 
@@ -75,7 +75,8 @@ column_prefixes_to_remove = [
     'HOME_C_6_9_',
     'HOME_D_10_14_', 
     'HOME_B_3YRS_',
-    'HOME_C_4_5_' 
+    'HOME_B_4_5_',
+    'HOME_C_4_5_',
     'HOME_C_6_',
     'HOME_D_10_',
     'HOME_A_', 
@@ -85,15 +86,23 @@ column_prefixes_to_remove = [
     'CHECK_'
 ]
 
-# Dictionary to map poorly-named columns to their intended names (for CLNS79 data)
+# Dictionary to map poorly-named columns to their intended names (basically, handling exceptions in the CLNS79 data)
 poorly_named_columns = {
-    'TYPE_OF_SCHOOL_94_': 'TYPE_OF_SCHOOL_',
-    'TYPE_OF_SCHOOL_96_': 'TYPE_OF_SCHOOL_',
-    'SAMPLE_RACE_78SCRN': 'MOTHER_RACE_XRND',
-    # TODO: Add any poorly named columns here, e.g. 'old_name': 'new_name'
-    # This can be used for both renaming columns and for handling special cases
+    'MOM_HELPS_CH_LE': 'MOM_HELPS_CH_LEARN_NUMBERS',
+    'MOM_HELPS_CH_LEARN_N': 'MOM_HELPS_CH_LEARN_NUMBERS',
+    'MOM_HELPS_CH_LEARN_A': 'MOM_HELPS_CH_LEARN_ALPHABET',
+    'MOM_HELPS_CH_LEARN_C': 'MOM_HELPS_CH_LEARN_COLORS',
+    'MOM_HELPS_CH_LEARN_S': 'MOM_HELPS_CH_LEARN_SHAPES',
+    'MOM_HELPS_CH_W_N': 'MOM_HELPS_CH_W_NONE',
+    'TYPE_OF_SCHOOL_94': 'TYPE_OF_SCHOOL_',
+    'TYPE_OF_SCHOOL_96': 'TYPE_OF_SCHOOL_',
+    'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA',
+    'HOW_OFTEN_CH_EATS' : 'HOW_OFTEN_CHILD_EATS_W'
+
+
 }
 
+# TODO: create list to rename columns
 
 
 
@@ -121,7 +130,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
     print(new_data.head())
     for column in nls_data.columns:
-        print(f"Processing column: {column}")
+        # print(f"Processing column: {column}")
         # Skip the 'id' column
         if column == 'id':
             continue
@@ -136,13 +145,13 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
         elif column[-4:].isdigit():  # Check if the last 4 characters are digits
             year = int(column[-4:])
 
-            # Find the column name, removing the year part
-            column_name = column[:-4]
+            # Find the column name, removing the year part (plus the underscore)
+            column_name = column[:-5]
 
             # Filter out unwanted prefixes from the column name
             for prefix in column_prefixes_to_remove:
                 if column_name.startswith(prefix):
-                    print(f"Removing prefix '{prefix}' from column name: {column_name}")
+                    # print(f"Removing prefix '{prefix}' from column name: {column_name}")
                     # Remove the prefix from the column name
                     column_name = column_name[len(prefix):]
 
@@ -162,10 +171,17 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
             #     continue
 
-            
 
-            print(f"Processing column with year: {year}, base column name: {column_name}")
+            if column_name[0].isdigit() or column_name[-1].isdigit():
+                print(f"Warning: Column name {column_name} starts or ends with a digit.")
+                print(f"Column name before processing: {column}")
+
+            if column_name[-1].isdigit():
+                # If the column name ends with a digit, remove the last two characters (the year and the underscore)
+                column_name = column_name[:-2]
             
+            
+            # print(f"Processing column with year: {year}, base column name: {column_name}")
             # Calculate the age of the child at that year
             nls_data['age'] = year - nls_data['CYRB_XRND']
             
@@ -177,7 +193,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 new_data[column_name] = np.nan
             
             
-            # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
+            # TODO: Since the IDs are unique and the ages are tiled, I feel like we can do this more efficiently...
             for id in new_data['id']:
 
                 # Get the value for this id and column
@@ -335,7 +351,7 @@ with keep.running(): # Keep the script running to avoid premature termination
     #     raise ValueError("Column 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' not found in the data. Check the data.")
 
 
-    # TODO: Combine the data with the regular NLSY79 data
+    # Combine the data with the regular NLSY79 data
     try:
         mother_data = pd.read_csv(mother_data_file_path)
     except FileNotFoundError:
@@ -356,8 +372,8 @@ with keep.running(): # Keep the script running to avoid premature termination
         elif column[-4:].isdigit():  # Check if the last 4 characters are digits
             year = int(column[-4:])
 
-            # Find the column name, removing the year part
-            column_name = column[:-4]
+            # Find the column name, removing the year part (plus the underscore)
+            column_name = column[:-5]
 
             # Filter out unwanted prefixes from the column name
             for prefix in column_prefixes_to_remove:
@@ -403,7 +419,6 @@ with keep.running(): # Keep the script running to avoid premature termination
                 nls_data_id = nls_data[nls_data['id'] == id]
                 # Get the age of the child at that year
                 child_age = year - nls_data_id['CYRB_XRND'].values[0]
-                print(f"CNLSY79 mother ID: {nls_data_id['MPUBID_XRND']}")
                 # Get the value for this id and column from the mother data
                 value = mother_data[mother_data['CASEID_1979'] == nls_data_id['MPUBID_XRND'].values[0]][column].values[0]
 

@@ -87,14 +87,15 @@ foreach var of local all_vars {
 	* actual description of the filenames)
 	
 // 	if substr("`lab'", 1, 4) == "HOME" {
-// 		local clean_label = substr("`lab'", 4, .)
+// 		local lab = substr("`lab'", 5, .)
 // 	}
 // 	else if substr("`lab'", 1, 5) == "CHECK" {
-// 		local clean_label = substr("`lab'", 5, .)
+// 		local lab = substr("`lab'", 6, .)
 // 	}
 // 	else if substr("`lab'", 1, 5) == "CHILD" {
-// 		local clean_label = substr("`lab'", 5, .)
+// 		local lab = substr("`lab'", 6, .)
 // 	}
+
 	local clean_label = "`lab'"
 	* Replace spaces and special characters with underscores
 	local clean_label = usubinstr("`clean_label'", " ", "_", .)
@@ -164,24 +165,38 @@ foreach var of local all_vars {
 		else if substr("`lab'", 1, 4) == "TYPE" {
 			local clean_label = substr("`lab'", 9, .)
 		}
-		else {
-			error("Unexpected variable name duplicate. Add it to exceptions")
-		}
+		
 		local clean_label = usubinstr("`clean_label'", " ", "_", .)
 		local clean_label = usubinstr("`clean_label'", ":", "_", .)
 		local clean_label = usubinstr("`clean_label'", "(", "_", .)
 		local clean_label = usubinstr("`clean_label'", ")", "_", .)
 		
-		if length("`clean_label'") > 27 {
-			local clean_label = substr("`clean_label'", 1, 27)
-		}
 		while strpos("`clean_label'", "__") > 0 {
 			local clean_label = usubinstr("`clean_label'", "__", "_", .)
 		}
+		
+		if length("`clean_label'") > 27 {
+			local clean_label = substr("`clean_label'", 1, 27)
+		}
+		
+		if substr("`clean_label'", 1, 1) == "_" {
+			local clean_label = substr("`clean_label'", 2, .)
+		}
+		
+		if substr("`clean_label'", -1, 1) == "_" {
+			local clean_label = substr("`clean_label'", 1, length("`clean_label'")-1)
+		}
+		
 		local newname = "`clean_label'_`date_suffix'"
 		
 	}
 	di "Working to rename column to `newname'"
+	* A janky solution to counter any names that don't go to plan
+	capture confirm variable `newname'
+	if !_rc {
+		local clean_label = substr("`clean_label'", 1, 25)
+		local newname = "`clean_label'_1_`date_suffix'"
+	}
 	
 	* Rename the variable (using capture to handle any remaining issues)
 	capture rename `var' `newname'
