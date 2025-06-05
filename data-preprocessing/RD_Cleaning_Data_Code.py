@@ -15,9 +15,10 @@ Period 3: age 15-19 (label: high school)
 The code performs the following tasks:
 0. Delete any existing output files to avoid confusion (make sure to respond to the input!)
 1. Load the data (for the file path, leave it as a variable to be specified later)
-2. Create a child by age panel, with the child ID and the age of the child (dropping any rows where age > 19 or age < 0), saving the panel to a new .csv file
-3. Create the child by period table by taking the middle value for each period (for example, age 12 for Period 2), and linearly interpolating between the different values in each period when applicable (for example, interpolating between math scores at ages 7 and 8 to find the best estimate for Period 1 (age 6-9). 
-4. Save the cleaned data to a new .csv file
+2. Create a child by age panel, with the child ID and the age of the child with the CNLSY79 data
+3. Combine this data with the data from the NLSY79 (which surveys the mother)
+4. Create the child by period table by taking the middle value for each period (for example, age 12 for Period 2), and linearly interpolating between the different values in each period when applicable (for example, interpolating between math scores at ages 7 and 8 to find the best estimate for Period 1 (age 6-9). 
+5. Save the cleaned data to a new .csv file
 
 Dependencies:
 - pandas
@@ -41,9 +42,9 @@ from wakepy import keep
 # CONSTANTS
 
 # File paths
-nan_file_path = 'data-preprocessing/nan_columns.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/nan_columns_full.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/child_age_panel_full.csv'
+period_output_file_path = 'data-preprocessing/child_period_panel_full.csv'  # File to save the child by period data
 nls_file_path = 'data-preprocessing/06-04-11am-renamed.csv'  # Update this path as needed
 
 age_periods = {
@@ -90,132 +91,26 @@ poorly_named_columns = {
 
 # FUNCTIONS
 
-# Function to create the child by period table from the child by age panel
-def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
-    """
-    Creates a child-by-period table from a child-by-age panel.
+# Function to create the child by age panel from a dataframe
 
+def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Creates a child-by-age panel from the CNLSY79 data.
     Parameters:
-        df (pd.DataFrame): The input DataFrame containing child-by-age data.
-        age_periods (dict): A dictionary mapping period numbers to age ranges (start_age, end_age).
-
+        nls_data (pd.DataFrame): The input DataFrame containing CNLSY79 data.
     Returns:
-        pd.DataFrame: A DataFrame containing interpolated values for each period, with columns for child ID, age, period, and other variables.
+        pd.DataFrame: A DataFrame containing child-by-age data, with columns for child ID, age, and other variables.
     """
-    period_data = pd.DataFrame()
-    for id in df['id'].unique():
-        for period, (start_age, end_age) in age_periods.items():
+    # A row in our new dataframe might look like this:
+    # | id | age | math_score | reading_score | ... |
 
-            # Filter the data for the current period and child ID
-            period_df = df[(df['age'] >= start_age) & (df['age'] <= end_age) & (df['id'] == id)].copy()
+    new_data = pd.DataFrame()
+    # Create the 'id' column such that it contains 20 unique child IDs for every child in the NLSY79 data (one for each age from 0 to 19)
+    new_data['id'] = np.repeat(nls_data['id'].unique(), 20)
+    # Create the 'age' column such that it contains the ages from 0 to 19 for each child
+    new_data['age'] = np.tile(np.arange(20), len(nls_data['id'].unique()))
 
-            # Calculate the middle age for the period
-            middle_age = (start_age + end_age) / 2
-            
-            # Interpolate values for each column in the period
-            interpolated_values = {}
-            for column in df.columns:
-                # Skip the 'id', 'age', and 'period' columns
-                if column in ['id', 'age', 'period']:
-                    continue
-
-                # Interpolate values for the current column
-                filtered_column = period_df[column][period_df[column] >= 0]  # Filter out negative values
-                if filtered_column.isna().all():
-                    print(f"Warning: All values in column '{column}' are NaN for period {period}.")
-                # If the column has only one valid value, use that value for the period
-                elif len(filtered_column) == 1:
-                    # Use the single value for the middle age
-                    interpolated_values[column] = filtered_column.iloc[0]
-                else:
-                    # Use np.interp to interpolate the values for the middle age
-                    # Use np.interp to interpolate the values for the middle age
-
-                    interpolated_values[column] = np.interp(middle_age, period_df['age'], period_df[column])
-
-            # Ensure period_df is not empty before creating a new row
-            if not period_df.empty:
-                # Create a new row for the period data
-                new_row = {'id': period_df['id'].iloc[0], 'period': period}
-                new_row.update(interpolated_values)
-                
-                # Add the new row to the period_data DataFrame
-                period_data = pd.concat([period_data, pd.DataFrame([new_row])], ignore_index=True)
-            # If period_df is empty, we add an empty row with the id and period
-            else:
-                new_row = {'id': id, 'period': period}
-                # Add the new row to the period_data DataFrame
-                period_data = pd.concat([period_data, pd.DataFrame([new_row])], ignore_index=True)
-
-    return period_data
-
-
-
-
-
-# --------------------------------- MAIN SCRIPT -----------------------------------------
-# =======================================================================================
-
-
-# 0. Deleting any existing output files to avoid confusion
-query = input("Would you like to delete any existing output files? (yes/no): ").strip().lower()
-# List of output files to delete
-output_files = [nan_file_path, age_output_file_path, period_output_file_path]
-if query == 'yes':
-    # Deleting the output files if they exist
-    for file in output_files:
-        if os.path.exists(file):
-            os.remove(file)
-            print(f"Deleted file: {file}")
-        else:
-            print(f"File not found, skipping deletion: {file}")
-else:
-    # Raising warnings if the files exist but aren't deleted
-    print("Skipping deletion of existing output files.")
-    for file in output_files:
-        if os.path.exists(file):
-            print(f"Warning: File {file} already exists. This may cause errors in the code.")
-
-
-
-# 1. Loading the data
-try:
-    nls_data = pd.read_csv(nls_file_path)
-except FileNotFoundError:
-    print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
-    raise
-nls_data = pd.DataFrame(nls_data)
-# Display the first few rows of the data to understand its structure
-print("Loaded data. Here are the first few rows:")
-print(nls_data.head())
-
-# Renaming child ID column
-nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
-
-# FOR TESTING PURPOSES: shorten the data to only include a few rows
-
-nls_data = nls_data.head(100)  # Uncomment this line to limit the data for testing purposes
-
-
-
-# 2. Create the child by age panel
-
-
-# Reformatting the data to be a 2D DataFrame, with each row representing a child-age pair, and each column representing a variable
-
-# For example, a row might look like this:
-# | id | age | math_score | reading_score | ... |
-
-new_data = pd.DataFrame()
-# Create the 'id' column such that it contains 20 unique child IDs for every child in the NLSY79 data (one for each age from 0 to 19)
-new_data['id'] = np.repeat(nls_data['id'].unique(), 20)
-# Create the 'age' column such that it contains the ages from 0 to 19 for each child
-new_data['age'] = np.tile(np.arange(20), len(nls_data['id'].unique()))
-
-print(new_data.head())
-
-with keep.running(): # Keep the script running to avoid premature termination
-    # Create the other columns in the new_data DataFrame based on the columns in nls_data
+    print(new_data.head())
     for column in nls_data.columns:
         print(f"Processing column: {column}")
         # Skip the 'id' column
@@ -294,6 +189,131 @@ with keep.running(): # Keep the script running to avoid premature termination
         else: 
             raise ValueError(f"Column {column} does not end with 'XRND' or a year. Please check the data format.")
 
+    return new_data
+
+
+
+
+# Function to create the child by period table from the child by age panel
+def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
+    """
+    Creates a child-by-period table from a child-by-age panel.
+
+    Parameters:
+        df (pd.DataFrame): The input DataFrame containing child-by-age data.
+        age_periods (dict): A dictionary mapping period numbers to age ranges (start_age, end_age).
+
+    Returns:
+        pd.DataFrame: A DataFrame containing interpolated values for each period, with columns for child ID, age, period, and other variables.
+    """
+    period_data = pd.DataFrame()
+    for id in df['id'].unique():
+        for period, (start_age, end_age) in age_periods.items():
+
+            # Filter the data for the current period and child ID
+            period_df = df[(df['age'] >= start_age) & (df['age'] <= end_age) & (df['id'] == id)].copy()
+
+            # Calculate the middle age for the period
+            middle_age = (start_age + end_age) / 2
+            
+            # Interpolate values for each column in the period
+            interpolated_values = {}
+            for column in df.columns:
+                # Skip the 'id', 'age', and 'period' columns
+                if column in ['id', 'age', 'period']:
+                    continue
+
+                # Interpolate values for the current column
+                filtered_column = period_df[column][period_df[column] >= 0]  # Filter out negative values
+                if filtered_column.isna().all():
+                    print(f"Warning: All values in column '{column}' are NaN for period {period}.")
+                # If the column has only one valid value, use that value for the period
+                elif len(filtered_column) == 1:
+                    # Use the single value for the middle age
+                    interpolated_values[column] = filtered_column.iloc[0]
+                else:
+                    # Use np.interp to interpolate the values for the middle age
+                    # Use np.interp to interpolate the values for the middle age
+
+                    interpolated_values[column] = np.interp(middle_age, period_df['age'], period_df[column])
+
+            # Ensure period_df is not empty before creating a new row
+            if not period_df.empty:
+                # Create a new row for the period data
+                new_row = {'id': period_df['id'].iloc[0], 'period': period}
+                new_row.update(interpolated_values)
+                
+                # Add the new row to the period_data DataFrame
+                period_data = pd.concat([period_data, pd.DataFrame([new_row])], ignore_index=True)
+            # If period_df is empty, we add an empty row with the id and period
+            else:
+                new_row = {'id': id, 'period': period}
+                # Add the new row to the period_data DataFrame
+                period_data = pd.concat([period_data, pd.DataFrame([new_row])], ignore_index=True)
+
+    return period_data
+
+
+
+
+# --------------------------------- MAIN SCRIPT -----------------------------------------
+# =======================================================================================
+
+
+# 0. Deleting any existing output files to avoid confusion
+query = input("Would you like to delete any existing output files? (yes/no): ").strip().lower()
+# List of output files to delete
+output_files = [nan_file_path, age_output_file_path, period_output_file_path]
+if query == 'yes':
+    # Deleting the output files if they exist
+    for file in output_files:
+        if os.path.exists(file):
+            os.remove(file)
+            print(f"Deleted file: {file}")
+        else:
+            print(f"File not found, skipping deletion: {file}")
+else:
+    # Raising warnings if the files exist but aren't deleted
+    print("Skipping deletion of existing output files.")
+    for file in output_files:
+        if os.path.exists(file):
+            print(f"Warning: File {file} already exists. This may cause errors in the code.")
+
+
+
+# 1. Loading the data
+try:
+    nls_data = pd.read_csv(nls_file_path)
+except FileNotFoundError:
+    print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+    raise
+nls_data = pd.DataFrame(nls_data)
+# Display the first few rows of the data to understand its structure
+print("Loaded data. Here are the first few rows:")
+print(nls_data.head())
+
+# Renaming child ID column
+nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
+
+# FOR TESTING PURPOSES: shorten the data to only include a few rows
+
+# nls_data = nls_data.head(11000)  # Uncomment this line to limit the data for testing purposes
+
+
+
+# 2. Create the child by age panel
+
+
+# Reformatting the data to be a 2D DataFrame, with each row representing a child-age pair, and each column representing a variable
+
+
+
+with keep.running(): # Keep the script running to avoid premature termination
+
+    new_data = create_child_by_age_panel(nls_data)
+
+        
+        
 
 
 
@@ -319,7 +339,7 @@ with keep.running(): # Keep the script running to avoid premature termination
     #     raise ValueError("Column 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' not found in the data. Check the data.")
 
 
-    # TODO: pair the data with the regular NLSY79 data
+    # TODO: Combine the data with the regular NLSY79 data
 
     # Filter out rows where age > 19 and age < 0
     new_data = new_data[(new_data['age'] >= 0) & (new_data['age'] <= 19)]
@@ -344,7 +364,6 @@ with keep.running(): # Keep the script running to avoid premature termination
         print("No columns with all NaN values found in the new_data DataFrame.")
 
     # Save the new_data DataFrame to a new file
-    age_output_file_path = 'child_age_panel.csv'
     new_data.to_csv(age_output_file_path)
     print(f"Cleaned data saved to {age_output_file_path}")
 
