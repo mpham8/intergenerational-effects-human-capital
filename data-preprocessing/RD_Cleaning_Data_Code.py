@@ -44,7 +44,7 @@ from wakepy import keep
 # File paths
 
 # Input files 
-nls_file_path = 'data-preprocessing/06-05-5pm-renamed.csv'  # Update this path as needed
+nls_file_path = 'data-preprocessing/06-05-7pm-renamed.csv'  # Update this path as needed
 mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
 
 # Output files
@@ -56,6 +56,7 @@ nls_file_path = 'data-preprocessing/06-04-11am-renamed.csv'  # Update this path 
 
 # Age periods dictionary
 age_periods = {
+    -1: (-1, -1), # Pre-birth
     0: (0, 5), # Pre-elementary
     1: (6, 9), # Elementary
     2: (10, 14), # Secondary
@@ -64,7 +65,7 @@ age_periods = {
 
 # List of special columns that need to be handled separately
 special_columns_excluding_dates = [
-    'HGC_OF_MOTHER_AS_OF_MAY_1_R', 
+    'HGC_OF_MOTHER_AS_OF_MAY_1_R', # NOTE: for now, this isn't handled. I'm pretty sure 
 ]
 
 
@@ -89,21 +90,31 @@ column_prefixes_to_remove = [
 # Dictionary to map poorly-named columns to their intended names (basically, handling exceptions in the CLNS79 data)
 poorly_named_columns = {
     'MOM_HELPS_CH_LE': 'MOM_HELPS_CH_LEARN_NUMBERS',
+    'MOM_HELPS_CH_LEA': 'MOM_HELPS_CH_LEARN_NUMBERS',
     'MOM_HELPS_CH_LEARN_N': 'MOM_HELPS_CH_LEARN_NUMBERS',
     'MOM_HELPS_CH_LEARN_A': 'MOM_HELPS_CH_LEARN_ALPHABET',
+    'MOM_HELPS_CH_LEARN_ALPHABE' : 'MOM_HELPS_CH_LEARN_ALPHABET',
     'MOM_HELPS_CH_LEARN_C': 'MOM_HELPS_CH_LEARN_COLORS',
     'MOM_HELPS_CH_LEARN_S': 'MOM_HELPS_CH_LEARN_SHAPES',
     'MOM_HELPS_CH_W_N': 'MOM_HELPS_CH_W_NONE',
     'TYPE_OF_SCHOOL_94': 'TYPE_OF_SCHOOL_',
     'TYPE_OF_SCHOOL_96': 'TYPE_OF_SCHOOL_',
+    'SCHOOL_CHILD_ATTENDS_2004': 'SCHOOL_CHILD_ATTENDS',
     'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA',
-    'HOW_OFTEN_CH_EATS' : 'HOW_OFTEN_CHILD_EATS_W'
-
+    'HOW_OFT_CH_EATS' : 'HOW_OFT_CH_EATS_W', 
+    'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W',
+    'HOW_OFTEN_MOM_R' : 'HOW_OFTEN_MOM_READS',
+    'HOW_OFTEN_MOM_RE' : 'HOW_OFTEN_MOM_READS',
+    'HOW_OFT_CH_W_D' : 'HOW_OFT_CH_W_DAD',
 
 }
 
 # TODO: create list to rename columns
-
+better_named_columns = {
+    'HOW_OFT_CH_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_MUSEUM', 
+    'HOW_OFT_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_PERFORMANCE',
+    'SAMPLE_RACE_78SCRN' : 'MOTHER_RACE_ENCODED',
+}
 
 
 
@@ -172,16 +183,24 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             #     continue
 
 
-            if column_name[0].isdigit() or column_name[-1].isdigit():
-                print(f"Warning: Column name {column_name} starts or ends with a digit.")
-                print(f"Column name before processing: {column}")
 
             if column_name[-1].isdigit():
                 # If the column name ends with a digit, remove the last two characters (the year and the underscore)
                 column_name = column_name[:-2]
             
+            # Removing leading and trailing underscores
+            if column_name[-1] == "_":
+                column_name = column_name[:-1]
+            if column_name[0] == "_":
+                column_name = column_name[1:]
+        
+
+            # Check if the column name starts or ends with a digit
+            if column_name[0].isdigit() or column_name[-1].isdigit():
+                print(f"Warning: Column name {column_name} starts or ends with a digit.")
+                print(f"Column name before processing: {column}")
             
-            # print(f"Processing column with year: {year}, base column name: {column_name}")
+            print(f"Processing column with year: {year}, base column name: {column_name}")
             # Calculate the age of the child at that year
             nls_data['age'] = year - nls_data['CYRB_XRND']
             
@@ -217,6 +236,8 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
 
 # Function to create the child by period table from the child by age panel
+
+# TODO: create pre-birth logic
 def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     """
     Creates a child-by-period table from a child-by-age panel.
@@ -248,7 +269,7 @@ def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
                 # Interpolate values for the current column
                 filtered_column = period_df[column][period_df[column] >= 0]  # Filter out negative values
                 if filtered_column.isna().all():
-                    ...
+                    interpolated_values[column] = np.nan  # If all values are NaN, set to NaN
                 # If the column has only one valid value, use that value for the period
                 elif len(filtered_column) == 1:
                     # Use the single value for the middle age
@@ -257,7 +278,11 @@ def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
                     # Use np.interp to interpolate the values for the middle age
                     # Use np.interp to interpolate the values for the middle age
 
-                    interpolated_values[column] = np.interp(middle_age, period_df['age'], period_df[column])
+                    valid_rows = period_df.dropna(subset=['age', column])
+                    if not valid_rows.empty:
+                        interpolated_values[column] = np.interp(middle_age, valid_rows['age'], valid_rows[column])
+                    else:
+                        interpolated_values[column] = np.nan
 
             # Ensure period_df is not empty before creating a new row
             if not period_df.empty:
@@ -279,6 +304,10 @@ def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
 
 
 # --------------------------------- MAIN SCRIPT -----------------------------------------
+# =======================================================================================
+# =======================================================================================
+# =======================================================================================
+# =======================================================================================
 # =======================================================================================
 
 
@@ -378,7 +407,7 @@ with keep.running(): # Keep the script running to avoid premature termination
             # Filter out unwanted prefixes from the column name
             for prefix in column_prefixes_to_remove:
                 if column_name.startswith(prefix):
-                    print(f"Removing prefix '{prefix}' from column name: {column_name}")
+                    # print(f"Removing prefix '{prefix}' from column name: {column_name}")
                     # Remove the prefix from the column name
                     column_name = column_name[len(prefix):]
 
@@ -454,6 +483,12 @@ with keep.running(): # Keep the script running to avoid premature termination
             new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
 
 
+
+    # Renaming columns
+    for column in new_data.columns:
+        if column in better_named_columns: 
+            # If the column is in the better named columns dictionary, rename it with the better name
+            new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
 
     # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
     new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
