@@ -7,6 +7,7 @@ Pytohn 3.13
 This code is meant to clean the data collected from the NLSY79 survey. It is meant to run in the base directory of the project. 
 
 This code creates a child-by-period panel, where each data point represents a variable for a child in a specific period. Each period corresponds to an age range of the child. The periods are as follows: 
+Period -1: age -1 (label: pre-birth)
 Period 0: age 0-5 (label: pre-elementary)
 Period 1: age 6-9 (label: elementary)
 Period 2: age 10-14 (label: secondary)
@@ -236,6 +237,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             
             
             # TODO: Since the IDs are unique and the ages are tiled, I feel like we can do this more efficiently...
+            # Look into pd.merge() or pd.join() to combine the data more efficiently
             for id in new_data['id']:
 
                 # Get the value for this id and column
@@ -275,10 +277,10 @@ def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     period_data = pd.DataFrame()
     for id in df['id'].unique():
         for period, (start_age, end_age) in age_periods.items():
-
+            
             # Filter the data for the current period and child ID
             period_df = df[(df['age'] >= start_age) & (df['age'] <= end_age) & (df['id'] == id)].copy()
-
+            # TODO: fix interpolation
             # Calculate the middle age for the period
             middle_age = (start_age + end_age) / 2
             
@@ -422,11 +424,19 @@ with keep.running(): # Keep the script running to avoid premature termination
                 
         
         # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
-        elif column[-4:].isdigit():  # Check if the last 4 characters are digits
-            year = int(column[-4:])
-
-            # Find the column name, removing the year part (plus the underscore)
-            column_name = column[:-5]
+        elif column[-2:].isdigit():  # Check if the last 2 characters are digits
+            if column[-4:].isdigit():
+                year = int(column[-4:])
+                # Find the column name, removing the year part (plus the underscore)
+                column_name = column[:-5]
+            
+            elif column[-2:].isdigit():
+                if int(column[-2:]) < 20:
+                    # If the last two digits are less than 20, we assume it's a year in the 2000s
+                    year = int("20" + column[-2:])
+                else: 
+                    year = int("19" + column[-2:])
+                    column_name = column[:-2]
 
             # Filter out unwanted prefixes from the column name
             for prefix in column_prefixes_to_remove:
@@ -466,6 +476,7 @@ with keep.running(): # Keep the script running to avoid premature termination
             
             
             # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
+            # Same thing
             for id in nls_data['id']:
 
                 # Get the relevant data
@@ -505,6 +516,8 @@ with keep.running(): # Keep the script running to avoid premature termination
             mother_map = dict(zip(mother_id, mother_col))
             # Fill in the value for all ages for each child
             new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
+    
+    # TODO: handle re-scaling variables
 
 
 
