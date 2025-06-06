@@ -1,3 +1,4 @@
+#!/bin/python3
 """ Bijan Taheri
 Professor Stephen O'Connell / Michael Pham
 June 2025
@@ -34,7 +35,6 @@ Dependencies:
 import pandas as pd
 import numpy as np
 import os
-from wakepy import keep
 
 
 
@@ -44,13 +44,13 @@ from wakepy import keep
 # File paths
 
 # Input files 
-nls_file_path = 'data-preprocessing/06-05-7pm-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
+nls_file_path = '06-05-7pm-renamed.csv'  # Update this path as needed
+mother_data_file_path = '06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
 
 # Output files
-nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
+nan_file_path = 'nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'child_age_panel_testing.csv'
+period_output_file_path = 'child_period_panel_testing.csv'  # File to save the child by period data
 
 
 # Age periods dictionary
@@ -104,32 +104,8 @@ poorly_named_columns = {
     'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W',
     'HOW_OFTEN_MOM_R' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFTEN_MOM_RE' : 'HOW_OFTEN_MOM_READS',
-    'HOW_OFTEN_MOM_READ' : 'HOW_OFTEN_MOM_READS',
-    'HOW_OFT_MOM_READ_TO' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFT_CH_W_D' : 'HOW_OFT_CH_W_DAD',
-    'HOW_OFT_CH_TAK' : 'HOW_OFT_CH_TAKEN',
-    'HOW_OFT_CH_TAKE' : 'HOW_OFT_CH_TAKEN',
-    'HOW_OFT_TAKEN_TO_P' : 'HOW_OFT_TAKEN',
-    'HOW_OFT_TAKEN_TO' : 'HOW_OFT_TAKEN',
-    'HOW_OFT_TAKEN_T' : 'HOW_OFT_TAKEN',
-    'MUSIC_INSTMT_CH_CA' : 'MUSIC_INSTMT_CH',
-    'MUSIC_INSTMT_C' : 'MUSIC_INSTMT_CH',
-    'IS_THERE_MUSIC_INSTR' : 'MUSIC_INSTMT_CH',
-    'IF_LOW_GRADES_HE' : 'IF_LOW_GRADES',
-    'IF_LOW_GRADES_HEL' : 'IF_LOW_GRADES', 
-    'DO_PARS_DISCUSS_T' : 'DO_PARS_DISCUSS',
-    'HOW_MANY_BOOKS_C' : 'HOW_MANY_BOOKS',
-    'HOW_MANY_BOOKS_CH' : 'HOW_MANY_BOOKS',
-    'HOW_MANY_BOOKS_CHI' : 'HOW_MANY_BOOKS',
-    'HOW_MANY_BOOKS_CHILD' : 'HOW_MANY_BOOKS',
-    'HOW_MANY_BOOKS_DOES' : 'HOW_MANY_BOOKS',
-    'HOW_OFT_CH_SPE' : 'HOW_OFT_CH_SPEND', 
-    'HOW_OFT_CH_SPEND_T' : 'HOW_OFT_CH_SPEND',
-    'HOW_OFT_CH_SPEND_TIM' : 'HOW_OFT_CH_SPEND',
-    'CHILD_GET_SPEC_LE' : 'CHILD_GET_SPEC_LESSON',
-    'CHILD_GET_SPEC_LESS' : 'CHILD_GET_SPEC_LESSON',
-    'CHILD_GET_SPEC_LESSO' : 'CHILD_GET_SPEC_LESSON',
-    # TODO: type school child attends
+
 }
 
 # TODO: create list to rename columns
@@ -223,7 +199,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 print(f"Warning: Column name {column_name} starts or ends with a digit.")
                 print(f"Column name before processing: {column}")
             
-            # print(f"Processing column with year: {year}, base column name: {column_name}")
+            print(f"Processing column with year: {year}, base column name: {column_name}")
             # Calculate the age of the child at that year
             nls_data['age'] = year - nls_data['CYRB_XRND']
             
@@ -336,23 +312,12 @@ def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
 
 # 0. Deleting any existing output files to avoid confusion
 
-query = input("Would you like to delete any existing output files? (yes/no): ").strip().lower()
 # List of output files to delete
 output_files = [nan_file_path, age_output_file_path, period_output_file_path]
-if query == 'yes':
-    # Deleting the output files if they exist
-    for file in output_files:
-        if os.path.exists(file):
-            os.remove(file)
-            print(f"Deleted file: {file}")
-        else:
-            print(f"File not found, skipping deletion: {file}")
-else:
-    # Raising warnings if the files exist but aren't deleted
-    print("Skipping deletion of existing output files.")
-    for file in output_files:
-        if os.path.exists(file):
-            print(f"Warning: File {file} already exists. This may cause errors in the code.")
+
+for file in output_files:
+    if os.path.exists(file):
+        print(f"Warning: File {file} already exists. This may cause errors in the code.")
 
 
 
@@ -372,173 +337,172 @@ nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
 
 # FOR TESTING PURPOSES: shorten the data to only include a few rows
 
-nls_data = nls_data.head(50)  # Uncomment this line to limit the data for testing purposes
+# nls_data = nls_data.head(1000)  # Uncomment this line to limit the data for testing purposes
 
 
 
 # 2. Create the child by age panel
-with keep.running(): # Keep the script running to avoid premature termination
 
-    # Creating the basic panel, excluding special columns
-    new_data = create_child_by_age_panel(nls_data)
+# Creating the basic panel, excluding special columns
+new_data = create_child_by_age_panel(nls_data)
 
+
+# Handling the special columns (TODO)
+
+# HGC_OF_MOTHER_AS_OF_MAY_1_R_ is a special column, for which we want to only keep the value of the pre-birth age of the child (age -1)
+# if 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' in new_data.columns:
+#     # Create a new column for the mother's education level at birth
+#     new_data['mother_education_at_birth'] = np.nan
     
-    # Handling the special columns (TODO)
+#     # Fill in the mother's education level at birth for each child
+#     for id in new_data['id'].unique():
+#         # Get the value for this id and column
+#         if (new_data[(new_data['id'] == id) & (new_data['age'] == -1)].empty):
+#             # If there is no value for age -1, we will fill it in with -10 (maybe we consider filing in with age = 0?)
+#             value = -10 
+#         else:
+#             value = new_data[(new_data['id'] == id) & (new_data['age'] == -1)]['HGC_OF_MOTHER_AS_OF_MAY_1_R_'].values[0]
+#         # Fill in the value for the corresponding age -1
+#         new_data.loc[(new_data['id'] == id), 'mother_education_at_birth'] = value
+# else:
+#     raise ValueError("Column 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' not found in the data. Check the data.")
 
-    # HGC_OF_MOTHER_AS_OF_MAY_1_R_ is a special column, for which we want to only keep the value of the pre-birth age of the child (age -1)
-    # if 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' in new_data.columns:
-    #     # Create a new column for the mother's education level at birth
-    #     new_data['mother_education_at_birth'] = np.nan
+
+# Combine the data with the regular NLSY79 data
+try:
+    mother_data = pd.read_csv(mother_data_file_path)
+except FileNotFoundError:
+    print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+    raise
+
+mother_data = pd.DataFrame(mother_data)
+
+for column in mother_data.columns:
+
+    # Skip the 'id' column
+    if column == 'CASEID_1979':
+        continue
         
-    #     # Fill in the mother's education level at birth for each child
-    #     for id in new_data['id'].unique():
-    #         # Get the value for this id and column
-    #         if (new_data[(new_data['id'] == id) & (new_data['age'] == -1)].empty):
-    #             # If there is no value for age -1, we will fill it in with -10 (maybe we consider filing in with age = 0?)
-    #             value = -10 
-    #         else:
-    #             value = new_data[(new_data['id'] == id) & (new_data['age'] == -1)]['HGC_OF_MOTHER_AS_OF_MAY_1_R_'].values[0]
-    #         # Fill in the value for the corresponding age -1
-    #         new_data.loc[(new_data['id'] == id), 'mother_education_at_birth'] = value
-    # else:
-    #     raise ValueError("Column 'HGC_OF_MOTHER_AS_OF_MAY_1_R_' not found in the data. Check the data.")
-
-
-    # Combine the data with the regular NLSY79 data
-    try:
-        mother_data = pd.read_csv(mother_data_file_path)
-    except FileNotFoundError:
-        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
-        raise
+            
     
-    mother_data = pd.DataFrame(mother_data)
-    
-    for column in mother_data.columns:
+    # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
+    elif column[-4:].isdigit():  # Check if the last 4 characters are digits
+        year = int(column[-4:])
 
-        # Skip the 'id' column
-        if column == 'CASEID_1979':
+        # Find the column name, removing the year part (plus the underscore)
+        column_name = column[:-5]
+
+        # Filter out unwanted prefixes from the column name
+        for prefix in column_prefixes_to_remove:
+            if column_name.startswith(prefix):
+                # print(f"Removing prefix '{prefix}' from column name: {column_name}")
+                # Remove the prefix from the column name
+                column_name = column_name[len(prefix):]
+
+        # If the column name is in the poorly named columns dictionary, rename it with the better name
+        if column_name in poorly_named_columns:
+            column_name = poorly_named_columns[column_name]
+        
+
+        # If the column name is in the special columns list, we will handle it separately
+        if column_name in special_columns_excluding_dates:
+            # print(f"Skipping special column: {column}")
             continue
-            
-                
+
+
+        # # FOR TESTING PURPOSES: continue if not in the special columns for testing
+        # if column_name not in special_columns_for_testing:
+        #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
+        #     continue
+
         
-        # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
-        elif column[-4:].isdigit():  # Check if the last 4 characters are digits
-            year = int(column[-4:])
 
-            # Find the column name, removing the year part (plus the underscore)
-            column_name = column[:-5]
+        print(f"Processing column with year: {year}, base column name: {column_name}")
+        
+        
+        
+        
 
-            # Filter out unwanted prefixes from the column name
-            for prefix in column_prefixes_to_remove:
-                if column_name.startswith(prefix):
-                    # print(f"Removing prefix '{prefix}' from column name: {column_name}")
-                    # Remove the prefix from the column name
-                    column_name = column_name[len(prefix):]
+        # Check if the column already exists in new_data
+        if column_name not in new_data.columns:
+            # If not, create it with NaN values
+            new_data[column_name] = np.nan
+        
+        
+        # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
+        for id in nls_data['id']:
 
-            # If the column name is in the poorly named columns dictionary, rename it with the better name
-            if column_name in poorly_named_columns:
-                column_name = poorly_named_columns[column_name]
-            
-
-            # If the column name is in the special columns list, we will handle it separately
-            if column_name in special_columns_excluding_dates:
-                # print(f"Skipping special column: {column}")
-                continue
-
-
-            # # FOR TESTING PURPOSES: continue if not in the special columns for testing
-            # if column_name not in special_columns_for_testing:
-            #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
-            #     continue
-
-            
-
-            # print(f"Processing column with year: {year}, base column name: {column_name}")
-            
-            
-            
-            
-
-            # Check if the column already exists in new_data
-            if column_name not in new_data.columns:
-                # If not, create it with NaN values
-                new_data[column_name] = np.nan
-            
-            
-            # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
-            for id in nls_data['id']:
-
-                # Get the relevant data
-                nls_data_id = nls_data[nls_data['id'] == id]
-                # Get the age of the child at that year
-                child_age = year - nls_data_id['CYRB_XRND'].values[0]
-                # Get the value for this id and column from the mother data
-                value = mother_data[mother_data['CASEID_1979'] == nls_data_id['MPUBID_XRND'].values[0]][column].values[0]
+            # Get the relevant data
+            nls_data_id = nls_data[nls_data['id'] == id]
+            # Get the age of the child at that year
+            child_age = year - nls_data_id['CYRB_XRND'].values[0]
+            # Get the value for this id and column from the mother data
+            value = mother_data[mother_data['CASEID_1979'] == nls_data_id['MPUBID_XRND'].values[0]][column].values[0]
 
 
-                # Fill in the value for the corresponding age
-                new_data.loc[(new_data['id'] == id) & (new_data['age'] == child_age), column_name] = value
+            # Fill in the value for the corresponding age
+            new_data.loc[(new_data['id'] == id) & (new_data['age'] == child_age), column_name] = value
 
 
-            # Ensure we have a pre-birth age (-1) value for each child for the column
-            if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
-                # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
-                # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
-                negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name].notna())]['age']
-                if not negative_ages.empty:
-                    greatest_negative_age = negative_ages.max()
-                    # Fill in the value for the corresponding age -1
-                    new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
-                else: 
-                    print(f"Warning: No negative ages found for id {id} in column {column_name}. Unable to fill in pre-birth age (-1) value.")
+        # Ensure we have a pre-birth age (-1) value for each child for the column
+        if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
+            # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
+            # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
+            negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name].notna())]['age']
+            if not negative_ages.empty:
+                greatest_negative_age = negative_ages.max()
+                # Fill in the value for the corresponding age -1
+                new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
+            else: 
+                print(f"Warning: No negative ages found for id {id} in column {column_name}. Unable to fill in pre-birth age (-1) value.")
 
-        # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
-        else: 
-            # Put out a warning if column doesn't end with XRND
-            if not column.endswith("XRND"):
-                print(f"Column {column} does not end with 'XRND'. It will be added to all ages for each child.")
-            # Add the mother's XRND variable to all ages for each child
-            # First, map CASEID_1979 to id
-            mother_id = mother_data['CASEID_1979']
-            mother_col = mother_data[column]
-            # Create a mapping from CASEID_1979 to the column value
-            mother_map = dict(zip(mother_id, mother_col))
-            # Fill in the value for all ages for each child
-            new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
+    # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
+    else: 
+        # Put out a warning if column doesn't end with XRND
+        if not column.endswith("XRND"):
+            print(f"Column {column} does not end with 'XRND'. It will be added to all ages for each child.")
+        # Add the mother's XRND variable to all ages for each child
+        # First, map CASEID_1979 to id
+        mother_id = mother_data['CASEID_1979']
+        mother_col = mother_data[column]
+        # Create a mapping from CASEID_1979 to the column value
+        mother_map = dict(zip(mother_id, mother_col))
+        # Fill in the value for all ages for each child
+        new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
 
 
 
-    # Renaming columns
-    for column in new_data.columns:
-        if column in better_named_columns: 
-            # If the column is in the better named columns dictionary, rename it with the better name
-            new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
+# Renaming columns
+for column in new_data.columns:
+    if column in better_named_columns: 
+        # If the column is in the better named columns dictionary, rename it with the better name
+        new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
 
-    # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
-    new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
+# Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
+new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
 
 
-    # 2a. Running some checks on the new_data DataFrame and saving it to a new file
+# 2a. Running some checks on the new_data DataFrame and saving it to a new file
 
-    # Check for nan values in the new_data DataFrame. If such values exist, print the number of nan values and the columns they are in
-    nan_counts = new_data.isna().sum()
-    # Identify columns where all values are NaN
-    all_nan_columns = nan_counts[nan_counts == len(new_data)].index.tolist()
-    if all_nan_columns:
-        print("Warning: The following columns have all NaN values in the new_data DataFrame:")
-        print(all_nan_columns)
+# Check for nan values in the new_data DataFrame. If such values exist, print the number of nan values and the columns they are in
+nan_counts = new_data.isna().sum()
+# Identify columns where all values are NaN
+all_nan_columns = nan_counts[nan_counts == len(new_data)].index.tolist()
+if all_nan_columns:
+    print("Warning: The following columns have all NaN values in the new_data DataFrame:")
+    print(all_nan_columns)
 
-        # Save only the columns with all NaN values to a separate file for further investigation
-        nan_data = new_data[all_nan_columns]
-        nan_data.to_csv(nan_file_path, index=False)
-        print(f"All-NaN columns data saved to {nan_file_path}")
+    # Save only the columns with all NaN values to a separate file for further investigation
+    nan_data = new_data[all_nan_columns]
+    nan_data.to_csv(nan_file_path, index=False)
+    print(f"All-NaN columns data saved to {nan_file_path}")
 
-    else:
-        print("No columns with all NaN values found in the new_data DataFrame.")
+else:
+    print("No columns with all NaN values found in the new_data DataFrame.")
 
-    # Save the new_data DataFrame to a new file
-    new_data.to_csv(age_output_file_path)
-    print(f"Cleaned data saved to {age_output_file_path}")
+# Save the new_data DataFrame to a new file
+new_data.to_csv(age_output_file_path)
+print(f"Cleaned data saved to {age_output_file_path}")
 
 
 
