@@ -69,6 +69,8 @@ special_columns_excluding_dates = [
 ]
 
 
+
+
 # List of prefixes for columns that should be removed when naming columns
 column_prefixes_to_remove = [
     'HOME_A_0_2_', 
@@ -145,6 +147,18 @@ better_named_columns = {
     'HOW_OFT_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_PERFORMANCE',
     'SAMPLE_RACE_78SCRN' : 'MOTHER_RACE_ENCODED',
 }
+
+# TODO: rescaling variables 
+rescaling_variables = {
+    'HOW_MANY_BOOKS' : []
+}
+
+# List of variables to rescale that are edge cases (the variable scales differ with age)
+# Each entry is [variable name, age range, set of new values]
+rescaling_variables_edge_cases = [
+    ['HOW_MANY_BOOKS', (0, 9), [0, 1.5, 6, ]]
+]
+
 
 
 
