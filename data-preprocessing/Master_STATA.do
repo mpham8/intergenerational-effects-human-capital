@@ -49,13 +49,13 @@ do "`rename_variable_labels_filepath'"
 export delimited "`cnls_save_filepath'"
 
 * Start over 
-clear all
+* clear all
 
 
-infile using "`nls79_dct_filepath'"
+* infile using "`nls79_dct_filepath'"
 * * FOR NLS79 DATA
 * Renaming to question codes
-do "`nls79_rename_qcodes_filepath'"
+* do "`nls79_rename_qcodes_filepath'"
 * Since question codes are much better for this dataset, we can simply save
-export delimited "`nls79_save_filepath'"
+* export delimited "`nls79_save_filepath'"
 

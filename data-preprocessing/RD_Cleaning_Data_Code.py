@@ -103,6 +103,7 @@ poorly_named_columns = {
     'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA',
     'HOW_OFT_CH_EATS' : 'HOW_OFT_CH_EATS_W', 
     'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W',
+    'HOW_OFT_CH_EATS_W_MO' : 'HOW_OFT_CH_EATS_W',
     'HOW_OFTEN_MOM_R' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFTEN_MOM_RE' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFTEN_MOM_READ' : 'HOW_OFTEN_MOM_READS',
@@ -110,6 +111,7 @@ poorly_named_columns = {
     'HOW_OFT_CH_W_D' : 'HOW_OFT_CH_W_DAD',
     'HOW_OFT_CH_TAK' : 'HOW_OFT_CH_TAKEN',
     'HOW_OFT_CH_TAKE' : 'HOW_OFT_CH_TAKEN',
+    'HOW_OFT_CH_TAKEN_T' : 'HOW_OFT_CH_TAKEN',
     'HOW_OFT_TAKEN_TO_P' : 'HOW_OFT_TAKEN',
     'HOW_OFT_TAKEN_TO' : 'HOW_OFT_TAKEN',
     'HOW_OFT_TAKEN_T' : 'HOW_OFT_TAKEN',
@@ -118,7 +120,10 @@ poorly_named_columns = {
     'IS_THERE_MUSIC_INSTR' : 'MUSIC_INSTMT_CH',
     'IF_LOW_GRADES_HE' : 'IF_LOW_GRADES',
     'IF_LOW_GRADES_HEL' : 'IF_LOW_GRADES', 
-    'DO_PARS_DISCUSS_T' : 'DO_PARS_DISCUSS',
+    'DO_PARS_DISCUSS' : 'DO_PARS_DISCUSS_TV',
+    'DO_PARS_DISCUSS_T' : 'DO_PARS_DISCUSS_TV',
+    'PARS_DISCUSS_TV_PROG' : 'DO_PARS_DISCUSS_TV',
+    'PARS_DISCUSS_TV_PRGM' : 'DO_PARS_DISCUSS_TV',
     'HOW_MANY_BOOKS_C' : 'HOW_MANY_BOOKS',
     'HOW_MANY_BOOKS_CH' : 'HOW_MANY_BOOKS',
     'HOW_MANY_BOOKS_CHI' : 'HOW_MANY_BOOKS',
@@ -130,6 +135,7 @@ poorly_named_columns = {
     'CHILD_GET_SPEC_LE' : 'CHILD_GET_SPEC_LESSON',
     'CHILD_GET_SPEC_LESS' : 'CHILD_GET_SPEC_LESSON',
     'CHILD_GET_SPEC_LESSO' : 'CHILD_GET_SPEC_LESSON',
+    'TOTAL_FAMILY_INCOME_FROM_AL' : 'TOTAL_FAMILY_INCOME_FR_ALL'
     # TODO: type school child attends
 }
 
@@ -258,6 +264,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     return new_data
 
 
+    
 
 
 # Function to create the child by period table from the child by age panel
@@ -374,7 +381,7 @@ nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
 
 # FOR TESTING PURPOSES: shorten the data to only include a few rows
 
-nls_data = nls_data.head(50)  # Uncomment this line to limit the data for testing purposes
+nls_data = nls_data.head(20)  # Uncomment this line to limit the data for testing purposes
 
 
 
@@ -424,19 +431,19 @@ with keep.running(): # Keep the script running to avoid premature termination
                 
         
         # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
-        elif column[-2:].isdigit():  # Check if the last 2 characters are digits
+        elif column[-4:].isdigit() or column[:-2] == "HGCREV":  # Check if the last 4 characters are digits or if the column is HGCREV
             if column[-4:].isdigit():
                 year = int(column[-4:])
                 # Find the column name, removing the year part (plus the underscore)
                 column_name = column[:-5]
             
-            elif column[-2:].isdigit():
-                if int(column[-2:]) < 20:
-                    # If the last two digits are less than 20, we assume it's a year in the 2000s
+            else: 
+                if int(column[-2:]) < 25:
+                    # If the last two digits are less than 25, we assume it's a year in the 2000s
                     year = int("20" + column[-2:])
                 else: 
                     year = int("19" + column[-2:])
-                    column_name = column[:-2]
+                column_name = column[:-2]
 
             # Filter out unwanted prefixes from the column name
             for prefix in column_prefixes_to_remove:
@@ -553,6 +560,8 @@ with keep.running(): # Keep the script running to avoid premature termination
     new_data.to_csv(age_output_file_path)
     print(f"Cleaned data saved to {age_output_file_path}")
 
+
+# 2b. Interpolating the data to fill missing values
 
 
 
