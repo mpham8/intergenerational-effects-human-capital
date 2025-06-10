@@ -26,6 +26,7 @@ Dependencies:
 - numpy
 - os
 - wakepy (for keeping the script running)
+- scipy (for pandas under-the-hood interpolation)
 
 
 
@@ -52,6 +53,13 @@ mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # 
 nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
 age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
 period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
+
+# Defining terms for rescaling data
+SEVERAL_TIMES_PER_YEAR = 10
+SEVERAL_TIMES_PER_MONTH = 7
+SEVERAL_TIMES_PER_WEEK = 4
+MORE_THAN_ONCE_PER_DAY = 2
+WEEKS_PER_MONTH = 4.345
 
 
 # Age periods dictionary
@@ -99,9 +107,14 @@ poorly_named_columns = {
     'MOM_HELPS_CH_LEARN_C': 'MOM_HELPS_CH_LEARN_COLORS',
     'MOM_HELPS_CH_LEARN_S': 'MOM_HELPS_CH_LEARN_SHAPES',
     'MOM_HELPS_CH_W_N': 'MOM_HELPS_CH_W_NONE',
-    'TYPE_OF_SCHOOL_94': 'TYPE_OF_SCHOOL_',
-    'TYPE_OF_SCHOOL_96': 'TYPE_OF_SCHOOL_',
-    'SCHOOL_CHILD_ATTENDS_2004': 'SCHOOL_CHILD_ATTENDS',
+    'TYPE_OF_SCHOOL_94': 'TYPE_OF_SCHOOL',
+    'TYPE_OF_SCHOOL_96': 'TYPE_OF_SCHOOL',
+    # NOTE: confused, what's the difference between "C" and "Y"
+    # 'MS_TYPE_OF_SCHOOL_CHILD_ATT' : 'TYPE_OF_SCHOOL',
+    # 'MS_TYPE_OF_SCH_CHD_ATTNDS_C' : 'TYPE_OF_SCHOOL',
+    # 'TYPE_OF_SCHOOL_CHILD_ATTEND' : 'TYPE_OF_SCHOOL',
+    # 'SCHOOL_CHILD_ATTENDS': 'TYPE_OF_SCHOOL',
+    # 'TYPE_SCHOOL_CHILD_ATTENDS_V' : 'SCHOOL_CHILD_ATTENDS_RECD',
     'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA',
     'HOW_OFT_CH_EATS' : 'HOW_OFT_CH_EATS_W', 
     'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W',
@@ -110,10 +123,13 @@ poorly_named_columns = {
     'HOW_OFTEN_MOM_RE' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFTEN_MOM_READ' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFT_MOM_READ_TO' : 'HOW_OFTEN_MOM_READS',
+    'HOW_OFT_DOES_MOM_REA' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFT_CH_W_D' : 'HOW_OFT_CH_W_DAD',
+    'HOW_OFT_CH_W_DAD_O' : 'HOW_OFT_CH_W_DAD',
     'HOW_OFT_CH_TAK' : 'HOW_OFT_CH_TAKEN',
     'HOW_OFT_CH_TAKE' : 'HOW_OFT_CH_TAKEN',
     'HOW_OFT_CH_TAKEN_T' : 'HOW_OFT_CH_TAKEN',
+    'HOW_OFT_CH_TAKEN_TO' : 'HOW_OFT_CH_TAKEN',
     'HOW_OFT_TAKEN_TO_P' : 'HOW_OFT_TAKEN',
     'HOW_OFT_TAKEN_TO' : 'HOW_OFT_TAKEN',
     'HOW_OFT_TAKEN_T' : 'HOW_OFT_TAKEN',
@@ -137,7 +153,7 @@ poorly_named_columns = {
     'CHILD_GET_SPEC_LE' : 'CHILD_GET_SPEC_LESSON',
     'CHILD_GET_SPEC_LESS' : 'CHILD_GET_SPEC_LESSON',
     'CHILD_GET_SPEC_LESSO' : 'CHILD_GET_SPEC_LESSON',
-    'TOTAL_FAMILY_INCOME_FROM_AL' : 'TOTAL_FAMILY_INCOME_FR_ALL'
+    'TOTAL_FAMILY_INCOME_FROM_AL' : 'TOTAL_FAMILY_INCOME_FR_ALL',
     # TODO: type school child attends
 }
 
@@ -145,18 +161,30 @@ poorly_named_columns = {
 better_named_columns = {
     'HOW_OFT_CH_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_MUSEUM', 
     'HOW_OFT_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_PERFORMANCE',
+    'HOW_OFT_CH_SPEND' : 'HOW_OFT_CH_SPEND_TIME_W_DAD',
+    'HOW_OFT_CH_W_DAD' : 'HOW_OFT_CH_W_DAD_OUTDOORS',
     'SAMPLE_RACE_78SCRN' : 'MOTHER_RACE_ENCODED',
+    'SCHOOL_CHILD_ATTENDS_RECD' : 'TYPE_OF_SCHOOL_RECODE'
 }
 
 # TODO: rescaling variables 
+# If over time, all variables will be rescaled to per year (easiest to do)
 rescaling_variables = {
-    'HOW_MANY_BOOKS' : []
+    'HOW_OFTEN_MOM_READS' : [0, SEVERAL_TIMES_PER_YEAR/52, SEVERAL_TIMES_PER_MONTH/WEEKS_PER_MONTH, 1, 3, 7], 
+    'HOW_OFT_CH_EATS_W' : [MORE_THAN_ONCE_PER_DAY*7, 7, SEVERAL_TIMES_PER_WEEK, 1, 1/WEEKS_PER_MONTH, 0], 
+    'HOW_OFT_CH_TAKEN_TO_MUSEUM' : [0, 1.5/52, SEVERAL_TIMES_PER_YEAR/52, 1/WEEKS_PER_MONTH, 1],
+    'HOW_OFT_CH_TAKEN_TO_PERFORMANCE' : [0, 1.5/52, SEVERAL_TIMES_PER_YEAR/52, 1/WEEKS_PER_MONTH, 1],
+    'HOW_OFT_CH_W_DAD' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan], 
+    'HOW_OFT_CH_W_DAD_OUTDOORS' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan],
+    'DO_PARS_DISCUSS_TV' : [0, 1, np.nan]
+    
 }
 
 # List of variables to rescale that are edge cases (the variable scales differ with age)
 # Each entry is [variable name, age range, set of new values]
-rescaling_variables_edge_cases = [
-    ['HOW_MANY_BOOKS', (0, 9), [0, 1.5, 6, ]]
+rescaling_variables_by_age = [
+    ('HOW_MANY_BOOKS', (0, 9), [0, 1.5, 6, 10]),
+    ('HOW_MANY_BOOKS', (10, 14), [0, 5, 15, 20])
 ]
 
 
@@ -256,15 +284,31 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 new_data[column_name] = np.nan
             
             
-            # TODO: Since the IDs are unique and the ages are tiled, I feel like we can do this more efficiently...
-            # Look into pd.merge() or pd.join() to combine the data more efficiently
-            for id in new_data['id']:
+            # Efficiently assign values using vectorized operations
+            # For each row in nls_data, set the value for the corresponding (id, age) in new_data
+            id_values = nls_data['id'].values
+            age_values = nls_data['age'].values if 'age' in nls_data.columns else np.full(len(nls_data), np.nan)
+            col_values = nls_data[column].values
 
-                # Get the value for this id and column
-                value = nls_data[nls_data['id'] == id][column].values[0]
-                age = nls_data[nls_data['id'] == id]['age'].values[0]
-                # Fill in the value for the corresponding age
-                new_data.loc[(new_data['id'] == id) & (new_data['age'] == age), column_name] = value
+            # Create a DataFrame for merging
+            temp_df = pd.DataFrame({
+                'id': id_values,
+                'age': age_values,
+                column_name: col_values
+            })
+
+            # Merge on id and age, updating only the relevant rows
+            new_data = new_data.merge(
+                temp_df,
+                on=['id', 'age'],
+                how='left',
+                # If columns overlap, add '_new' to the right DataFrame's column name
+                suffixes=('', '_new')
+            )
+            # If the merged column exists, update values where not null
+            if f"{column_name}_new" in new_data.columns:
+                new_data[column_name] = new_data[f"{column_name}_new"].combine_first(new_data[column_name])
+                new_data.drop(columns=[f"{column_name}_new"], inplace=True)
 
         
         
@@ -284,69 +328,48 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 # Function to create the child by period table from the child by age panel
 
 
-def create_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
+def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     """
-    Creates a child-by-period table from a child-by-age panel.
+    Creates a child-by-period table from a child-by-age panel, excluding the pre-birth period (age = -1) from interpolation.
 
     Parameters:
         df (pd.DataFrame): The input DataFrame containing child-by-age data.
         age_periods (dict): A dictionary mapping period numbers to age ranges (start_age, end_age).
 
     Returns:
-        pd.DataFrame: A DataFrame containing interpolated values for each period, with columns for child ID, age, period, and other variables.
+        pd.DataFrame: A DataFrame containing interpolated values for each period (except pre-birth), where interpolation is performed by averaging values within each period. The resulting DataFrame includes columns for child ID, period, and other variables.
     """
-    period_data = pd.DataFrame()
-    for id in df['id'].unique():
-        for period, (start_age, end_age) in age_periods.items():
-            
-            # Filter the data for the current period and child ID
-            period_df = df[(df['age'] >= start_age) & (df['age'] <= end_age) & (df['id'] == id)].copy()
-            # TODO: fix interpolation
-            # Calculate the middle age for the period
-            middle_age = (start_age + end_age) / 2
-            
-            # Interpolate values for each column in the period
-            interpolated_values = {}
-            for column in df.columns:
-                # Skip the 'id', 'age', and 'period' columns
-                if column in ['id', 'age', 'period']:
-                    continue
+    df = df.copy()
 
-                # Interpolate values for the current column
-                filtered_column = period_df[column][period_df[column] >= 0]  # Filter out negative values
-                if filtered_column.isna().all():
-                    interpolated_values[column] = np.nan  # If all values are NaN, set to NaN
-                # If the column has only one valid value, use that value for the period
-                elif len(filtered_column) == 1:
-                    # Use the single value for the middle age
-                    interpolated_values[column] = filtered_column.iloc[0]
-                else:
-                    # Use np.interp to interpolate the values for the middle age
-                    # Use np.interp to interpolate the values for the middle age
+    # Exclude pre-birth rows (age == -1) from interpolation/aggregation
+    pre_birth = df[df['age'] == -1]
+    df = df[df['age'] >= 0]
 
-                    valid_rows = period_df.dropna(subset=['age', column])
-                    if not valid_rows.empty:
-                        interpolated_values[column] = np.interp(middle_age, valid_rows['age'], valid_rows[column])
-                    else:
-                        interpolated_values[column] = np.nan
+    # Create bins and labels for periods, excluding pre-birth
+    non_prebirth_periods = {k: v for k, v in age_periods.items() if v[0] >= 0}
+    bins = [v[0] for v in non_prebirth_periods.values()]
+    bins = [min(bins)] + [v[1] for v in non_prebirth_periods.values()]
+    print(f"Here are the bins: {bins}")
+    labels = list(non_prebirth_periods.keys())
 
-            # Ensure period_df is not empty before creating a new row
-            if not period_df.empty:
-                # Create a new row for the period data
-                new_row = {'id': period_df['id'].iloc[0], 'period': period}
-                new_row.update(interpolated_values)
-                
-                # Add the new row to the period_data DataFrame
-                period_data = pd.concat([period_data, pd.DataFrame([new_row])], ignore_index=True)
-            # If period_df is empty, we add an empty row with the id and period
-            else:
-                new_row = {'id': id, 'period': period}
-                # Add the new row to the period_data DataFrame
-                period_data = pd.concat([period_data, pd.DataFrame([new_row])], ignore_index=True)
+    # Assign periods using pd.cut
+    df['period'] = pd.cut(df['age'], bins=[-0.1] + bins, labels=labels, right=True)
+
+    # Filter out rows with no period assigned (shouldn't happen, but just in case)
+    df = df[df['period'].notna()]
+
+    # Group by child and period, calculating the mean to 
+    group_cols = ['id', 'period']
+    value_cols = [col for col in df.columns if col not in ['id', 'age', 'period']]
+    period_data = df.groupby(group_cols, as_index=False)[value_cols].mean(skipna=True)
+
+    if not pre_birth.empty:
+        pre_birth = pre_birth.copy()
+        pre_birth['period'] = -1
+        pre_birth = pre_birth[group_cols + value_cols]
+        period_data = pd.concat([pre_birth, period_data], ignore_index=True).sort_values(['id', 'period'])
 
     return period_data
-
-
 
 
 # --------------------------------- MAIN SCRIPT -----------------------------------------
@@ -445,7 +468,7 @@ with keep.running(): # Keep the script running to avoid premature termination
                 
         
         # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
-        elif column[-4:].isdigit() or column[:-2] == "HGCREV":  # Check if the last 4 characters are digits or if the column is HGCREV
+        elif column[-4:].isdigit() or column[0:6] == "HGCREV":  # Check if the last 4 characters are digits or if the column is HGCREV
             if column[-4:].isdigit():
                 year = int(column[-4:])
                 # Find the column name, removing the year part (plus the underscore)
@@ -496,20 +519,21 @@ with keep.running(): # Keep the script running to avoid premature termination
                 new_data[column_name] = np.nan
             
             
-            # TODO: Since the IDs are unique and the ages are tiled, we can do this more efficiently
-            # Same thing
-            for id in nls_data['id']:
+            # Efficiently map mother data to child data for this column and year
+            # Create a mapping from child id to (CYRB_XRND, MPUBID_XRND)
+            id_to_birthyear = nls_data.set_index('id')['CYRB_XRND'].to_dict()
+            id_to_motherid = nls_data.set_index('id')['MPUBID_XRND'].to_dict()
+            # Create a mapping from mother id to column value
+            mother_col_map = mother_data.set_index('CASEID_1979')[column].to_dict()
 
-                # Get the relevant data
-                nls_data_id = nls_data[nls_data['id'] == id]
-                # Get the age of the child at that year
-                child_age = year - nls_data_id['CYRB_XRND'].values[0]
-                # Get the value for this id and column from the mother data
-                value = mother_data[mother_data['CASEID_1979'] == nls_data_id['MPUBID_XRND'].values[0]][column].values[0]
+            # For all children, compute the child's age at this year and the value from mother data
+            ids = new_data['id'].unique()
+            child_ages = {id_: year - id_to_birthyear[id_] for id_ in ids}
+            mother_values = {id_: mother_col_map.get(id_to_motherid[id_], np.nan) for id_ in ids}
 
-
-                # Fill in the value for the corresponding age
-                new_data.loc[(new_data['id'] == id) & (new_data['age'] == child_age), column_name] = value
+            # Assign values in one go
+            mask = new_data['age'].map(child_ages) == new_data['age']
+            new_data.loc[mask, column_name] = new_data.loc[mask, 'id'].map(mother_values)
 
 
             # Ensure we have a pre-birth age (-1) value for each child for the column
@@ -537,9 +561,6 @@ with keep.running(): # Keep the script running to avoid premature termination
             mother_map = dict(zip(mother_id, mother_col))
             # Fill in the value for all ages for each child
             new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
-    
-    # TODO: handle re-scaling variables
-
 
 
     # Renaming columns
@@ -547,6 +568,24 @@ with keep.running(): # Keep the script running to avoid premature termination
         if column in better_named_columns: 
             # If the column is in the better named columns dictionary, rename it with the better name
             new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
+
+
+    # Rescale columns
+    # Rescale columns according to rescaling_variables
+    for column in new_data.columns:
+        if column in rescaling_variables:
+            old_values = np.arange(1, len(rescaling_variables[column]) + 1)
+            new_values = rescaling_variables[column]
+            new_data[column] = new_data[column].replace(dict(zip(old_values, new_values)))
+            print(f"Rescaled column {column}")
+    # Rescale columns according to rescaling_variables_by_age
+    for entry in rescaling_variables_by_age:
+        col_name, (start_age, end_age), new_values = entry
+        old_values = np.arange(1, len(new_values) + 1)
+        mask = (new_data['age'] >= start_age) & (new_data['age'] <= end_age)
+        if col_name in new_data.columns:
+            new_data.loc[mask, col_name] = new_data.loc[mask, col_name].replace(dict(zip(old_values, new_values)))
+            print(f"Rescaled column {col_name} for ages {start_age}-{end_age}")
 
     # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
     new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
@@ -576,7 +615,59 @@ with keep.running(): # Keep the script running to avoid premature termination
 
 
 # 2b. Interpolating the data to fill missing values
+# --- Interpolation and Filling Missing Values for Ages 0–19 ---
 
+# Separate pre-birth (age -1) data for later recombination
+pre_birth_rows = new_data[new_data['age'] == -1]
+
+# Filter for ages 0–19
+age_panel = new_data[(new_data['age'] >= 0) & (new_data['age'] <= 19)]
+
+# Ensure every child has a complete set of ages 0–19
+all_ages = pd.DataFrame({'age': np.arange(0, 20)})
+# For each child, merge their data with the full age range
+complete_age_panel = (
+    age_panel.groupby('id', group_keys=False)
+    .apply(lambda group: pd.merge(all_ages, group, on='age', how='left').assign(id=group['id'].iloc[0]))
+    .reset_index(drop=True)
+)
+
+# Sort by child and age for proper interpolation
+complete_age_panel = complete_age_panel.sort_values(['id', 'age'])
+
+# Interpolate missing values for each child using cubic interpolation
+def interpolate_child_data(child_df):
+    # Interpolate all columns except 'id' and 'age' 
+    interpolated = child_df.copy()
+    value_columns = [col for col in child_df.columns if col not in ['id', 'age']]
+    interpolated[value_columns] = child_df[value_columns].interpolate(
+        method='cubic', limit_direction='both', axis=0
+    )
+    return interpolated
+
+interpolated_panel = (
+    complete_age_panel.groupby('id', group_keys=False)
+    .apply(interpolate_child_data)
+    .reset_index(drop=True)
+)
+
+# Fill any remaining edge NaNs by carrying forward/backward the nearest valid value
+def fill_edges(child_df):
+    filled = child_df.copy()
+    value_columns = [col for col in child_df.columns if col not in ['id', 'age']]
+    filled[value_columns] = filled[value_columns].ffill().bfill()
+    return filled
+
+final_age_panel = (
+    interpolated_panel.groupby('id', group_keys=False)
+    .apply(fill_edges)
+    .reset_index(drop=True)
+)
+
+# Combine interpolated ages 0–19 with pre-birth rows, and sort
+new_data_interpolated = pd.concat([pre_birth_rows, final_age_panel], ignore_index=True).sort_values(['id', 'age'])
+
+# --- End Interpolation Section ---
 
 
 
@@ -584,7 +675,7 @@ with keep.running(): # Keep the script running to avoid premature termination
 
 
 # Create the period data
-period_data = create_period_data(new_data, age_periods)
+period_data = aggregate_period_data(new_data_interpolated, age_periods)
 
 
 # Print the first few rows of the period data to verify
