@@ -4,7 +4,7 @@ This file is meant to provide clear instructions on how to go about cleaning the
 
 ## Step 1: Download/Choose the Data
 
-If you want to use data from the NLS investigator, you can start with the tagset Bijan has uploaded. The tagset contains all variables from the CNLSY79, and will be updated whenever we decide to include (or exclude) some variables. 
+If you want to use data from the NLS investigator, you can start with the tagsets Bijan has uploaded. The tagset with the child's data will be from the CNLSY79 (with a filename ending in .CHILDYA), and the tagset with the mother's data will be from the NLSY79 (with a filename ending in NLSY79). It should be updated whenever we decide to include (or exclude) some variables. 
 
 # Step 1a: Modify the "-value-labels.do" file
 
