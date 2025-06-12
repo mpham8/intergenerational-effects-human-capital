@@ -1,0 +1,27 @@
+import pandas as pd
+import numpy as np
+
+df = pd.read_excel('NDCP2022.xlsx')
+
+selected_columns = ['STATE_NAME','COUNTY_NAME','COUNTY_FIPS_CODE','STUDYYEAR','MCINFANT', 'MCTODDLER', 'MCPRESCHOOL','MFCCINFANT', 'MFCCTODDLER', 'MFCCPRESCHOOL',
+'MHI_2022','MFI_2022']
+childcare_data = df[selected_columns]
+
+childcare_data['Weighted_Center_Price'] = (childcare_data['MCINFANT']*24 + childcare_data['MCTODDLER']*12 + childcare_data['MCPRESCHOOL']*18) / 54
+childcare_data['Weighted_Family_Care_Price'] = (childcare_data['MFCCINFANT']*24 + childcare_data['MFCCTODDLER']*12 + childcare_data['MFCCPRESCHOOL']*18) / 54
+
+# Rename columns for clarity
+childcare_data.rename(columns={
+    'MCINFANT': 'Median_Center_Infant_Price',
+    'MCTODDLER': 'Median_Center_Toddler_Price',
+    'MCPRESCHOOL': 'Median_Center_Preschool_Price',
+    'MFCCINFANT': 'Median_Family_Infant_Price',
+    'MFCCTODDLER': 'Median_Family_Toddler_Price',
+    'MFCCPRESCHOOL': 'Median_Family_Preschool_Price',
+    'MHI_2022': 'Median_Household_Income_2022Adjusted',
+    'MFI_2022': 'Median_Family_Income_2022Adjusted',
+}, inplace=True)
+
+
+
+childcare_data.to_csv('NDCP_Processed_Data.csv', index=False)

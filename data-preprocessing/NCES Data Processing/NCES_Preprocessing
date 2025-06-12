@@ -1,0 +1,129 @@
+import pandas as pd
+import numpy as np
+import os
+
+'''TOTALEXP (total expenditures) = TCURELSC + TNONELSE + TCAPOUT + L12 + M12 + Q11 + I86 + V91 + V92
+	TCURELSC = TOTAL CURRENT EXPENDITURES FOR ELEMENTARY/SECONDARY EDUCATION
+	TNONELSE = TOTAL NON-ELEMENTARY/SECONDARY EXPENDITURES
+	TCAPOUT = TOTAL CAPITAL OUTLAY EXPENDITURES
+	L12 = PAYMENTS TO STATE GOVERNMENTS
+	M12 = PAYMENTS TO LOCAL GOVERNMENTS
+	Q11 = PAYMENTS TO OTHER SCHOOL SYSTEMS
+	I86 = INTEREST ON DEBT
+	V91 = PAYMENTS TO PRIVATE SCHOOLS
+	V92 = PAYMENTS TO CHARTER SCHOOLS
+'''
+
+variables = [
+    "TOTALEXP", "TCURELSC", "TNONELSE", "TCAPOUT", "L12", "M12", "Q11", "I86", "V91", "V92", "V33"
+]
+location_columns = ["CONUM"]
+year_range = range(1990, 2023)  # Adjust as needed for your files
+
+all_years = []
+
+for year in year_range:
+    print(f"Processing year: {year}")
+    year_suffix = str(year)[-2:]
+    file_path = f'NCES Data Processing/sdf{year_suffix}.txt'
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path, sep='\t', low_memory=False, encoding='latin1')
+        df['year'] = year
+        cols = location_columns + variables + ['year']
+        cols = [col for col in cols if col in df.columns]
+        data = df[cols].copy()
+        # Clean negative and zero values for all variables except CONUM, year
+        for var in variables:
+            if var in data.columns:
+                data[var] = pd.to_numeric(data[var], errors='coerce')
+                data[var] = data[var].mask((data[var] < 0) | (data[var] == 0), np.nan)
+        # Calculate per student columns (except for year, CONUM, V33)
+        for var in variables:
+            if var not in ['V33'] and var in data.columns and 'V33' in data.columns:
+                data[f"{var}_per_student"] = np.where(
+                    data["V33"] > 0, data[var] / data["V33"], np.nan
+                )
+                data[f"{var}_per_student"] = data[f"{var}_per_student"].mask(data[f"{var}_per_student"] == 0, np.nan)
+        all_years.append(data)
+    else:
+        print(f"File not found: {file_path}")
+
+# Combine all years
+combined = pd.concat(all_years, ignore_index=True)
+
+# Rename columns as requested
+rename_dict = {
+    "CONUM": "FIPS",
+    "V33": "student_population",
+    "TOTALEXP": "total_expenditures",
+    "TOTALEXP_per_student": "total_expenditures_per_student"
+}
+combined.rename(columns=rename_dict, inplace=True)
+
+# Reorder columns: year, FIPS, student_population, every other variable, every other variable's per student version
+# Get the list of variables (excluding TOTALEXP and V33 since they're renamed)
+other_vars = [v for v in variables if v not in ["TOTALEXP", "V33"]]
+ordered_cols = (
+    ["year", "FIPS", "student_population", "total_expenditures"] +
+    other_vars +
+    [f"{v}_per_student" for v in other_vars] +
+    ["total_expenditures_per_student"]
+)
+# Only keep columns that exist in the DataFrame and in the desired order
+ordered_cols = [col for col in ordered_cols if col in combined.columns]
+combined = combined[ordered_cols]
+
+combined.to_csv('NCES_Processed_Data_All_Years.csv', index=False)
+
+# Descriptive statistics for 2022 only, for all per_student columns
+stats_list = []
+data_2022 = combined[combined['year'] == 2022]
+for col in combined.columns:
+    if col.endswith('_per_student'):
+        total = data_2022[col].shape[0]
+        missing = data_2022[col].isna().sum()
+        percent_missing = (missing / total) * 100 if total > 0 else np.nan
+        mean = data_2022[col].mean()
+        median = data_2022[col].median()
+        std = data_2022[col].std()
+        min_val = data_2022[col].min()
+        max_val = data_2022[col].max()
+        stats_list.append({
+            'Variable': col,
+            'Percent_Missing': percent_missing,
+            'Mean': mean,
+            'Median': median,
+            'Std': std,
+            'Min': min_val,
+            'Max': max_val
+        })
+
+stats_df = pd.DataFrame(stats_list)
+stats_df.to_csv('NCES_Descriptive_Stats_2022.csv', index=False)
+
+# Descriptive statistics for total_expenditures_per_student by year
+by_year_stats = []
+for year in sorted(combined['year'].unique()):
+    year_data = combined[combined['year'] == year]
+    col = 'total_expenditures_per_student'
+    if col in year_data.columns:
+        total = year_data[col].shape[0]
+        missing = year_data[col].isna().sum()
+        percent_missing = (missing / total) * 100 if total > 0 else np.nan
+        mean = year_data[col].mean()
+        median = year_data[col].median()
+        std = year_data[col].std()
+        min_val = year_data[col].min()
+        max_val = year_data[col].max()
+        by_year_stats.append({
+            'Year': year,
+            'Percent_Missing': percent_missing,
+            'Mean': mean,
+            'Median': median,
+            'Std': std,
+            'Min': min_val,
+            'Max': max_val
+        })
+
+by_year_stats_df = pd.DataFrame(by_year_stats)
+by_year_stats_df.to_csv('NCES_Descriptive_Stats_total_expenditures_per_student.csv', index=False)

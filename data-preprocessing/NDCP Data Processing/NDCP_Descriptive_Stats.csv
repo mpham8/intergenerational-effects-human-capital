@@ -1,0 +1,12 @@
+,% Missing,Mean,Std,Min,Max
+Study Year,0,2014.999959,4.32066,2008,2022
+"Center-Based Price, Infant",27,153.975857,57.265855,27.73,606.61
+"Center-Based Price, Toddler",27,138.175214,47.20035,21.54,520
+"Center-Based Price, Preschool",27,129.740236,42.049534,21.54,496.3
+"Family Price, Infant",28,120.933737,36.654244,43.08,407.69
+"Family Price, Toddler",28,114.008874,33.571159,43.08,393.25
+Family Price Preschool,28,111.513456,32.520099,40.03,409.64
+Weighted Center Price,27,142.38548,49.343274,24.291,524.94
+Weighted Family Care Price,28,116.242991,34.289161,43.08,394.329
+"Median Household Income, 2022 Adjusted",0,59286.21241,16845.51752,13019,170935
+"Median Family Income, 2022 Adjusted",0,73325.08804,19638.04572,15099,210680
