@@ -50,14 +50,14 @@ nls_file_path = 'data-preprocessing/06-05-7pm-renamed.csv'  # Update this path a
 mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
 
 # Output files
-nan_file_path = 'data-preprocessing/nan_columns_BEST.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel_BEST.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel_BEST.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
+period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
 
 
 
 # Defining terms for processing
-SHORTEN_DATA = False
+SHORTEN_DATA = True
 NUMBER_OF_ROWS_TESTING = 50
 PREBIRTH_AGES_PER_CHILD = 10 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
 # Defining terms for rescaling data
@@ -190,8 +190,11 @@ better_named_columns = {
     'SAMPLE_SEX' : 'MOM_SEX', # could be a good check
     'HGCREV' : 'HGC_REV_MOM', 
     'IS_SCHOOL_GIFTED_HANDICAPPE' : 'IS_SCHOOL_GIFTED_HANDICAPPED',
-    'HOW_OFTEN_PARENTS_HELP_WITH_H' : 'PARS_HELP_W_HOMEWORK',
-
+    'HOW_OFT_PARENTS_HELP_WITH_H' : 'PARS_HELP_W_HOMEWORK',
+    'PIAT_MATH_TOTAL_RAW_SCORE' : 'PIAT_MATH', 
+    'PIAT_READ_REC_TOTAL_RAW_SCO' : 'PIAT_READ_REC', 
+    'PIAT_READ_COMP_TOTAL_RAW_SC' : 'PIAT_READ_COMP', 
+    'PPVT_TOTAL_RAW_SCORE' : 'PPVT', 
 }
 
 # TODO: rescaling variables 
