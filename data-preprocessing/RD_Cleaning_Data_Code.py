@@ -26,6 +26,7 @@ Dependencies:
 - numpy
 - os
 - scipy (for pandas under-the-hood interpolation)
+- openpyxl (for pandas under-the-hood opening excel files)
 
 
 
@@ -46,16 +47,17 @@ import os
 # Input files 
 nls_file_path = 'data-preprocessing/06-05-7pm-renamed.csv'  # Update this path as needed
 mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
+CPI_file_path = 'data-preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
-nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/nan_columns_BESTEST.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/child_age_panel_BESTEST.csv'
+period_output_file_path = 'data-preprocessing/child_period_panel_BESTEST.csv'  # File to save the child by period data
 
 
 
 # Defining terms for processing
-SHORTEN_DATA = True
+SHORTEN_DATA = False
 NUMBER_OF_ROWS_TESTING = 50
 PREBIRTH_AGES_PER_CHILD = 5 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
 
@@ -66,6 +68,8 @@ SEVERAL_TIMES_PER_MONTH = 5
 SEVERAL_TIMES_PER_WEEK = 4
 MORE_THAN_ONCE_PER_DAY = 2
 WEEKS_PER_MONTH = 4.345
+
+INFLATION_ADJUSTED_COLUMNS = ["TNFI_TRUNC", "TOTAL_FAMILY_INCOME_FR_ALL", "FAMILY_INCOME_FROM_ALL_SOUR"]
 
 
 # Age periods dictionary
@@ -173,7 +177,6 @@ poorly_named_columns = {
     'MAR_10A' : 'Q2_15A',
     'MAR_10B' : 'Q2_15B',
     # NOTE: combine Q2_15A and Q2_15A_PRE?
-    # TODO: type school child attends
 }
 
 # TODO: create list to rename columns
@@ -197,7 +200,6 @@ better_named_columns = {
     'PPVT_TOTAL_RAW_SCORE' : 'PPVT', 
 }
 
-# TODO: rescaling variables 
 # If over time, all variables will be rescaled to per week (easiest to do)
 rescaling_variables = {
     'HOW_OFTEN_MOM_READS' : [0, SEVERAL_TIMES_PER_YEAR/52, SEVERAL_TIMES_PER_MONTH/WEEKS_PER_MONTH, 1, 3, 7], 
@@ -230,16 +232,18 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     Parameters:
         nls_data (pd.DataFrame): The input DataFrame containing CNLSY79 data.
     Returns:
-        pd.DataFrame: A DataFrame containing child-by-age data, with columns for child ID, age, and other variables.
+        pd.DataFrame: A DataFrame containing child-by-age data, with columns for child ID, age, year, and other variables.
     """
     # A row in our new dataframe might look like this:
-    # | id | age | math_score | reading_score | ... |
+    # | id | age | Year | math_score | reading_score | ... |
 
     new_data = pd.DataFrame()
     # Create the 'id' column such that it contains 20+PREBIRTH_ unique child IDs for every child in the NLSY79 data (one for each age from -1 to 19)
     new_data['id'] = np.repeat(nls_data['id'].unique(), 20+PREBIRTH_AGES_PER_CHILD)
     # Create the 'age' column such that it contains the ages from 0 to 19 for each child
     new_data['age'] = np.tile(np.arange(-PREBIRTH_AGES_PER_CHILD, 20), len(nls_data['id'].unique()))
+    # Initialize the Year column with NaN
+    new_data['year'] = np.nan
 
     print(new_data.head())
     for column in nls_data.columns:
@@ -318,14 +322,15 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             # Efficiently assign values using vectorized operations
             # For each row in nls_data, set the value for the corresponding (id, age) in new_data
             id_values = nls_data['id'].values
-            age_values = nls_data['age'].values if 'age' in nls_data.columns else np.full(len(nls_data), np.nan)
+            age_values = nls_data['age'].values
             col_values = nls_data[column].values
 
             # Create a DataFrame for merging
             temp_df = pd.DataFrame({
                 'id': id_values,
                 'age': age_values,
-                column_name: col_values
+                column_name: col_values,
+                'year': year
             })
 
             # Merge on id and age, updating only the relevant rows
@@ -340,6 +345,10 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             if f"{column_name}_new" in new_data.columns:
                 new_data[column_name] = new_data[f"{column_name}_new"].combine_first(new_data[column_name])
                 new_data.drop(columns=[f"{column_name}_new"], inplace=True)
+            # Update the Year column only where it is NaN and temp_df.Year is not NaN
+            if "year_new" in new_data.columns:
+                new_data['year'] = new_data['year'].combine_first(new_data['year_new'])
+                new_data.drop(columns=['year_new'], inplace=True)
 
         
         
@@ -372,6 +381,10 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     """
     df = df.copy()
 
+    # Dropping the "year" column (it no longer holds significance)
+
+    if 'year' in df.columns: 
+        df.drop('year', axis=1)
     # Exclude pre-birth rows (age == -1) from interpolation/aggregation (since the row represents pre-birth values)
     pre_birth = df[df['age'] == -1]
     df = df[df['age'] >= 0]
@@ -415,6 +428,12 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
         period_data = pd.concat([pre_birth, period_data], ignore_index=True).sort_values(['id', 'period'])
 
     return period_data
+
+
+def get_CPI_values(CPI_file_path: str) -> np.ndarray:
+    CPI_data = pd.read_excel(CPI_file_path, header=3)
+    CPI_data['yearly_data'] = CPI_data.iloc[:, 2:].sum(axis=1, numeric_only=True)
+    return dict(zip(CPI_data['Year'].values, CPI_data['yearly_data']))
 
 
 # --------------------------------- MAIN SCRIPT -----------------------------------------
@@ -604,6 +623,7 @@ for column in new_data.columns:
         new_values = rescaling_variables[column]
         new_data[column] = new_data[column].replace(dict(zip(old_values, new_values)))
         # print(f"Rescaled column {column}")
+
 # Rescale columns according to rescaling_variables_by_age
 for entry in rescaling_variables_by_age:
     col_name, (start_age, end_age), new_values = entry
@@ -612,6 +632,19 @@ for entry in rescaling_variables_by_age:
     if col_name in new_data.columns:
         new_data.loc[mask, col_name] = new_data.loc[mask, col_name].replace(dict(zip(old_values, new_values)))
         # print(f"Rescaled column {col_name} for ages {start_age}-{end_age}")
+
+
+# Rescale columns according to inflation adjustment
+# NOTE: THIS IS WRONG
+CPI_values = get_CPI_values(CPI_file_path)
+for column in new_data.columns: 
+    if column in INFLATION_ADJUSTED_COLUMNS: 
+        # Rescale the column by the CPI value
+        new_data[column] = new_data.apply(
+            lambda row: row[column] * (CPI_values.get(row['year'], 1) / CPI_values.get(1975, 1)),
+            axis=1
+        )
+
 
 # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
 new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
@@ -756,7 +789,9 @@ if not negative_values.empty:
     print("Warning: The following negative values were found in the period_data DataFrame (excluding -7 and -1):")
     print(negative_values)
 
-
+# Temporary check: printing inflation-adjusted columns
+print("Here are columns to check out")
+print(period_data[INFLATION_ADJUSTED_COLUMNS].head(10))
 
 # Checking to see if there are any columns with all NaN values
 nan_counts = period_data.isna().sum()
@@ -770,6 +805,8 @@ if all_nan_columns:
 
 else:
     print("No columns with all NaN values found in the period_data DataFrame.")
+
+
 
 # Save data to csv
 period_data.to_csv(period_output_file_path, index=False)
