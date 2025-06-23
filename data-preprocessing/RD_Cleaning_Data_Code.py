@@ -46,14 +46,15 @@ from categories_of_variables import categories_of_variables
 # File paths
 
 # Input files 
-nls_file_path = 'data-preprocessing/06-05-7pm-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
-CPI_file_path = 'data-preprocessing/historical-cpi-u-202505.xlsx'
+nls_file_path = 'data-preprocessing/Initial_Preprocessing/06-23-25-renamed.csv'  # Update this path as needed
+mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
+CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
-nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/Initial_Preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_age_panel_testing.csv'
+period_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
+
 
 
 
@@ -92,7 +93,6 @@ columns_to_drop = {
     "MOM_HELPS_CH_W_NONE", 
     "MOM_RACE_ID", 
     "MOM_SEX", 
-    
 }
 
 
@@ -185,6 +185,7 @@ poorly_named_columns = {
     'MAR_10A' : 'Q2_15A',
     'MAR_10B' : 'Q2_15B',
     'MUSICAL_INSTMT_CH' : 'MUSIC_INSTMT_CH', 
+    'CH_GET_SPEC_LESSONS' : 'CH_GET_SPEC_LESSON', 
     # NOTE: combine Q2_15A and Q2_15A_PRE?
 }
 
