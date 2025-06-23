@@ -51,15 +51,15 @@ mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-05-mother-s
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
-nan_file_path = 'data-preprocessing/Initial_Preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_age_panel_testing.csv'
-period_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/Initial_Preprocessing/nan_columns_BEST.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_age_panel_BEST.csv'
+period_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_BEST.csv'  # File to save the child by period data
 
 
 
 
 # Defining terms for processing
-SHORTEN_DATA = True
+SHORTEN_DATA = False
 NUMBER_OF_ROWS_TESTING = 500
 PREBIRTH_AGES_PER_CHILD = 5 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
 
@@ -93,6 +93,7 @@ columns_to_drop = {
     "MOM_HELPS_CH_W_NONE", 
     "MOM_RACE_ID", 
     "MOM_SEX", 
+    "DOES_CHILD_NEVER_USE", 
 }
 
 
@@ -186,6 +187,7 @@ poorly_named_columns = {
     'MAR_10B' : 'Q2_15B',
     'MUSICAL_INSTMT_CH' : 'MUSIC_INSTMT_CH', 
     'CH_GET_SPEC_LESSONS' : 'CH_GET_SPEC_LESSON', 
+    'HIGHEST_GRADE_R_HAS_COMPLET' : 'HIGHEST_GRADE_OF_REGULAR_SC'
     # NOTE: combine Q2_15A and Q2_15A_PRE?
 }
 
@@ -207,6 +209,7 @@ better_named_columns = {
     'PIAT_READ_REC_TOTAL_RAW_SCO' : 'PIAT_READ_REC', 
     'PIAT_READ_COMP_TOTAL_RAW_SC' : 'PIAT_READ_COMP', 
     'PPVT_TOTAL_RAW_SCORE' : 'PPVT', 
+    'HIGHEST_GRADE_OF_REGULAR_SC' : 'HGC_YEARLY_CHILD', # NOTE: does this column need to be processed differently? It's the only column in "Educational Attainment" that's not XRND (i.e., across the whole file)
 }
 
 # If over time, all variables will be rescaled to per week (easiest to do)
@@ -796,7 +799,7 @@ def main():
     # Temporary check: printing inflation-adjusted columns
     print("Here are columns to check out")
     print(period_data[INFLATION_ADJUSTED_COLUMNS].head(10))
-
+    
     # Checking to see if there are any columns with all NaN values
     nan_counts = period_data.isna().sum()
     all_nan_columns = nan_counts[nan_counts == len(period_data)].index.tolist()
@@ -810,8 +813,10 @@ def main():
     else:
         print("No columns with all NaN values found in the period_data DataFrame.")
 
+    # Dropping bad columns
+    period_data = period_data.drop(columns=columns_to_drop)
 
-    # TODO: check for "bad" columns
+    # Checking for "bad" columns
 
     # Count the number of full rows gained from dropping each column
     gain_from_column_drop = {}
@@ -832,8 +837,6 @@ def main():
 
 
         
-    # Actually dropping columns
-    period_data.drop(columns=columns_to_drop)
 
 
 
@@ -850,7 +853,8 @@ def main():
     print(period_data.columns.to_list())
     for category, column_names in categories_of_variables.items(): 
         for column in column_names: 
-            period_data_stats["Category"].iloc[period_data.columns.to_list().index(column)] = category
+            if column not in columns_to_drop: 
+                period_data_stats["Category"].iloc[period_data.columns.to_list().index(column)] = category
         
     period_data_stats.to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv", mode='w')
     print("Summary of period data saved")

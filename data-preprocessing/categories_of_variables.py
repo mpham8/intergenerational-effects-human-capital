@@ -28,7 +28,7 @@ categories_of_variables =  {
         "BS_XRND", 
         "MASTERS_XRND", 
         "PROFDEGREE_XRND", 
-        "HIGHEST_GRADE_OF_REGULAR_SC", 
+        "HGC_YEARLY_CHILD", 
         "HGC_EVER_XRND",
         "HIGHEST_DEGREE_EVER_XRND",
     ], 
