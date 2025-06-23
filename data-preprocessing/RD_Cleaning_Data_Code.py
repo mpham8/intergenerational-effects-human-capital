@@ -28,7 +28,7 @@ Dependencies:
 - scipy (for pandas under-the-hood interpolation)
 - openpyxl (for pandas under-the-hood opening excel files)
 
-
+Note: make sure the "categories_of_variables" file is hosted within the same directory as this file
 
 """
 
@@ -36,6 +36,7 @@ Dependencies:
 import pandas as pd
 import numpy as np
 import os
+from categories_of_variables import categories_of_variables
 
 
 
@@ -50,15 +51,15 @@ mother_data_file_path = 'data-preprocessing/06-05-mother-simple-renamed.csv'  # 
 CPI_file_path = 'data-preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
-nan_file_path = 'data-preprocessing/nan_columns_BESTEST.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/child_age_panel_BESTEST.csv'
-period_output_file_path = 'data-preprocessing/child_period_panel_BESTEST.csv'  # File to save the child by period data
+nan_file_path = 'data-preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/child_age_panel_testing.csv'
+period_output_file_path = 'data-preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
 
 
 
 # Defining terms for processing
-SHORTEN_DATA = False
-NUMBER_OF_ROWS_TESTING = 50
+SHORTEN_DATA = True
+NUMBER_OF_ROWS_TESTING = 500
 PREBIRTH_AGES_PER_CHILD = 5 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
 
 
@@ -72,6 +73,8 @@ WEEKS_PER_MONTH = 4.345
 INFLATION_ADJUSTED_COLUMNS = ["TNFI_TRUNC", "TOTAL_FAMILY_INCOME_FR_ALL", "FAMILY_INCOME_FROM_ALL_SOUR"]
 
 
+
+
 # Age periods dictionary
 age_periods = {
     -1: (-1, -1), # Pre-birth
@@ -81,11 +84,16 @@ age_periods = {
     3: (15, 19) # High school
 }
 
-# List of special columns that need to be handled separately
-special_columns_excluding_dates = [
-]
-
-
+columns_to_drop = {
+    "Q2_15C", 
+    "Q2_15A_PRE", 
+    "VERSION_R29_XRND", 
+    "TYPE_OF_SCHOOL_RECODE", 
+    "MOM_HELPS_CH_W_NONE", 
+    "MOM_RACE_ID", 
+    "MOM_SEX", 
+    
+}
 
 
 # List of prefixes for columns that should be removed when naming columns
@@ -129,10 +137,10 @@ poorly_named_columns = {
     'CHILD_ATTENDS_PUBLIC_PRIV_R' : 'CH_ATTENDS_PUBLIC_PRIV_RELI', 
     'IS_CURRENT_MOST_RECENT_SCHO' : 'CH_ATTENDS_PUBLIC_PRIV_RELI', 
     'IS_SCHOOL_GIFTED_HANDICA' : 'IS_SCHOOL_GIFTED_HANDICAPPE', 
-    'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA',
+    'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA', 
     'HOW_LONG_DID_CHILD_ATTEND_H' : 'HOW_LONG_CHILD_WAS_IN_HEAD', 
     'HOW_OFT_CH_EATS' : 'HOW_OFT_CH_EATS_W', 
-    'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W',
+    'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W', 
     'HOW_OFT_CH_EATS_W_MO' : 'HOW_OFT_CH_EATS_W',
     'HOW_OFTEN_MOM_R' : 'HOW_OFTEN_MOM_READS',
     'HOW_OFTEN_MOM_RE' : 'HOW_OFTEN_MOM_READS',
@@ -176,10 +184,10 @@ poorly_named_columns = {
     'TOTAL_FAMILY_INCOME_FROM_AL' : 'TOTAL_FAMILY_INCOME_FR_ALL',
     'MAR_10A' : 'Q2_15A',
     'MAR_10B' : 'Q2_15B',
+    'MUSICAL_INSTMT_CH' : 'MUSIC_INSTMT_CH', 
     # NOTE: combine Q2_15A and Q2_15A_PRE?
 }
 
-# TODO: create list to rename columns
 better_named_columns = {
     'HOW_OFT_CH_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_MUSEUM', 
     'HOW_OFT_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_PERFORMANCE',
@@ -278,17 +286,11 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 column_name = poorly_named_columns[column_name]
             
 
-            # If the column name is in the special columns list, we will handle it separately
-            if column_name in special_columns_excluding_dates:
-                # print(f"Skipping special column: {column}")
+
+
+            # If the column is 'HGC_OF_MOTHER_AS_OF_MAY_1_R_1994', we should exclude (it's a strange anomaly in the data)
+            if column == 'HGC_OF_MOTHER_AS_OF_MAY_1_R_1994':
                 continue
-
-
-            # # FOR TESTING PURPOSES: continue if not in the special columns for testing
-            # if column_name not in special_columns_for_testing:
-            #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
-            #     continue
-
 
 
             if column_name[-1].isdigit():
@@ -443,389 +445,432 @@ def get_CPI_values(CPI_file_path: str) -> np.ndarray:
 # =======================================================================================
 # =======================================================================================
 
-
-# 0. Deleting any existing output files to avoid confusion
-
-query = input("Would you like to delete any existing output files? (yes/no): ").strip().lower()
-# List of output files to delete
-output_files = [nan_file_path, age_output_file_path, period_output_file_path]
-if query == 'yes':
-    # Deleting the output files if they exist
-    for file in output_files:
-        if os.path.exists(file):
-            os.remove(file)
-            print(f"Deleted file: {file}")
-        else:
-            print(f"File not found, skipping deletion: {file}")
-elif query == 'kill' or query == 'quit': 
-    # Quitting program
-    print("Killing program....")
-    quit()
-else:
-    # Raising warnings if the files exist but aren't deleted
-    print("Skipping deletion of existing output files.")
-    for file in output_files:
-        if os.path.exists(file):
-            print(f"Warning: File {file} already exists. This may cause errors in the code.")
+def main():
 
 
+    # 0. Deleting any existing output files to avoid confusion
 
-# 1. Loading the data
-try:
-    nls_data = pd.read_csv(nls_file_path)
-except FileNotFoundError:
-    print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
-    raise
-nls_data = pd.DataFrame(nls_data)
-# Display the first few rows of the data to understand its structure
-print("Loaded data. Here are the first few rows:")
-print(nls_data.head())
-
-# Renaming child ID column
-nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
-
-# FOR TESTING PURPOSES: shorten the data to only include a few rows
-if SHORTEN_DATA: 
-    nls_data = nls_data.head(NUMBER_OF_ROWS_TESTING)
-    print(f"Data shortened to {NUMBER_OF_ROWS_TESTING} rows")
+    query = input("Would you like to delete any existing output files? (yes/no): ").strip().lower()
+    # List of output files to delete
+    output_files = [nan_file_path, age_output_file_path, period_output_file_path]
+    if query == 'yes':
+        # Deleting the output files if they exist
+        for file in output_files:
+            if os.path.exists(file):
+                os.remove(file)
+                print(f"Deleted file: {file}")
+            else:
+                print(f"File not found, skipping deletion: {file}")
+    elif query == 'kill' or query == 'quit': 
+        # Quitting program
+        print("Killing program....")
+        quit()
+    else:
+        # Raising warnings if the files exist but aren't deleted
+        print("Skipping deletion of existing output files.")
+        for file in output_files:
+            if os.path.exists(file):
+                print(f"Warning: File {file} already exists. This may cause errors in the code.")
 
 
 
+    # 1. Loading the data
+    try:
+        nls_data = pd.read_csv(nls_file_path)
+    except FileNotFoundError:
+        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+        raise
+    nls_data = pd.DataFrame(nls_data)
+    # Display the first few rows of the data to understand its structure
+    print("Loaded data. Here are the first few rows:")
+    print(nls_data.head())
 
-# 2. Create the child by age panel
+    # Renaming child ID column
+    nls_data.rename(columns={'CPUBID_XRND': 'id'}, inplace=True)
 
-# Creating the basic panel, excluding special columns (of which there are none right now)
-new_data = create_child_by_age_panel(nls_data)
+    # FOR TESTING PURPOSES: shorten the data to only include a few rows
+    if SHORTEN_DATA: 
+        nls_data = nls_data.head(NUMBER_OF_ROWS_TESTING)
+        print(f"Data shortened to {NUMBER_OF_ROWS_TESTING} rows")
 
 
 
-# Combine the data with the regular NLSY79 data
-try:
-    mother_data = pd.read_csv(mother_data_file_path)
-except FileNotFoundError:
-    print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
-    raise
 
-mother_data = pd.DataFrame(mother_data)
+    # 2. Create the child by age panel
 
-for column in mother_data.columns:
-    
-    # print(f"Processing column: {column}")
-    # Skip the 'id' column
-    if column == 'CASEID_1979':
-        continue
+    # Creating the basic panel, excluding special columns (of which there are none right now)
+    new_data = create_child_by_age_panel(nls_data)
+
+
+
+    # Combine the data with the regular NLSY79 data
+    try:
+        mother_data = pd.read_csv(mother_data_file_path)
+    except FileNotFoundError:
+        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+        raise
+
+    mother_data = pd.DataFrame(mother_data)
+
+    for column in mother_data.columns:
         
-
-    # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
-    elif column[-4:].isdigit():  # Check if the last 4 characters are digits
-        if column[-4:].isdigit():
-            year = int(column[-4:])
-            # Find the column name, removing the year part (plus the underscore)
-            column_name = column[:-5]
-        
-        # Remove any lingering dates
-        if column_name[-2:].isdigit() and not column_name.startswith("ASVAB"):
-            # Find the column name, removing the year part (plus the underscore)
-            column_name = column_name[:-2]
-
-        # Filter out unwanted prefixes from the column name
-        for prefix in column_prefixes_to_remove:
-            if column_name.startswith(prefix):
-                # print(f"Removing prefix '{prefix}' from column name: {column_name}")
-                # Remove the prefix from the column name
-                column_name = column_name[len(prefix):]
-
-        # If the column name is in the poorly named columns dictionary, rename it with the better name
-        if column_name in poorly_named_columns:
-            column_name = poorly_named_columns[column_name]
-        
-
-        # If the column name is in the special columns list, we will handle it separately
-        if column_name in special_columns_excluding_dates:
-            # print(f"Skipping special column: {column}")
+        # print(f"Processing column: {column}")
+        # Skip the 'id' column
+        if column == 'CASEID_1979':
             continue
-
-
-        # # FOR TESTING PURPOSES: continue if not in the special columns for testing
-        # if column_name not in special_columns_for_testing:
-        #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
-        #     continue
-
-        
-        
-        
-        
-        
-
-        # Check if the column already exists in new_data
-        if column_name not in new_data.columns:
-            # If not, create it with NaN values
-            new_data[column_name] = np.nan
-        
-        
-        # Efficiently map mother data to child data for this column and year
-        # Create a mapping from child id to (CYRB_XRND, MPUBID_XRND)
-        id_to_birthyear = nls_data.set_index('id')['CYRB_XRND'].to_dict()
-        id_to_motherid = nls_data.set_index('id')['MPUBID_XRND'].to_dict()
-        # Create a mapping from mother id to column value
-        mother_col_map = mother_data.set_index('CASEID_1979')[column].to_dict()
-
-        # For all children, compute the child's age at this year and the value from mother data
-        ids = new_data['id'].unique()
-        child_ages = {id_: year - id_to_birthyear[id_] for id_ in ids}
-        mother_values = {id_: mother_col_map.get(id_to_motherid[id_], np.nan) for id_ in ids}
-
-        # Assign values in one go
-        mask = new_data['age'] == new_data['id'].map(child_ages)
-        new_data.loc[mask, column_name] = new_data.loc[mask, 'id'].map(mother_values)
-
-
-        # Ensure we have a pre-birth age (-1) value for each child for the column
-        if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
-            # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
-            # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
-            negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name] >= 0)]['age']
-            if not negative_ages.empty:
-                greatest_negative_age = negative_ages.max()
-                # Fill in the value for the corresponding age -1
-                for id in new_data['id'].unique():
-                    new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
             
 
-    # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
-    else: 
-        # Put out a warning if column doesn't end with XRND
-        if not column.endswith("XRND"):
-            print(f"Column {column} does not end with 'XRND'. It will be added to all ages for each child.")
-        # Add the mother's XRND variable to all ages for each child
-        # First, map CASEID_1979 to id
-        mother_id = mother_data['CASEID_1979']
-        mother_col = mother_data[column]
-        # Create a mapping from CASEID_1979 to the column value
-        mother_map = dict(zip(mother_id, mother_col))
-        # Fill in the value for all ages for each child
-        new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
+        # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
+        elif column[-4:].isdigit():  # Check if the last 4 characters are digits
+            if column[-4:].isdigit():
+                year = int(column[-4:])
+                # Find the column name, removing the year part (plus the underscore)
+                column_name = column[:-5]
+            
+            # Remove any lingering dates
+            if column_name[-2:].isdigit() and not column_name.startswith("ASVAB"):
+                # Find the column name, removing the year part (plus the underscore)
+                column_name = column_name[:-2]
 
+            # Filter out unwanted prefixes from the column name
+            for prefix in column_prefixes_to_remove:
+                if column_name.startswith(prefix):
+                    # print(f"Removing prefix '{prefix}' from column name: {column_name}")
+                    # Remove the prefix from the column name
+                    column_name = column_name[len(prefix):]
 
-# Renaming columns
-for column in new_data.columns:
-    if column in better_named_columns: 
-        # If the column is in the better named columns dictionary, rename it with the better name
-        new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
-
-
-# Rescale columns
-# Rescale columns according to rescaling_variables
-print("Rescaling columns...")
-for column in new_data.columns:
-    if column in rescaling_variables:
-        old_values = np.arange(1, len(rescaling_variables[column]) + 1)
-        new_values = rescaling_variables[column]
-        new_data[column] = new_data[column].replace(dict(zip(old_values, new_values)))
-        # print(f"Rescaled column {column}")
-
-# Rescale columns according to rescaling_variables_by_age
-for entry in rescaling_variables_by_age:
-    col_name, (start_age, end_age), new_values = entry
-    old_values = np.arange(1, len(new_values) + 1)
-    mask = (new_data['age'] >= start_age) & (new_data['age'] <= end_age)
-    if col_name in new_data.columns:
-        new_data.loc[mask, col_name] = new_data.loc[mask, col_name].replace(dict(zip(old_values, new_values)))
-        # print(f"Rescaled column {col_name} for ages {start_age}-{end_age}")
-
-
-# Rescale columns according to inflation adjustment
-# NOTE: THIS IS WRONG
-CPI_values = get_CPI_values(CPI_file_path)
-for column in new_data.columns: 
-    if column in INFLATION_ADJUSTED_COLUMNS: 
-        # Rescale the column by the CPI value
-        new_data[column] = new_data.apply(
-            lambda row: row[column] * (CPI_values.get(row['year'], 1) / CPI_values.get(1975, 1)),
-            axis=1
-        )
-
-
-# Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
-new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
-
-
-# 2a. Running some checks on the new_data DataFrame and saving it to a new file
-
-# Check for nan values in the new_data DataFrame. If such values exist, print the number of nan values and the columns they are in
-nan_counts = new_data.isna().sum()
-# Identify columns where all values are NaN
-all_nan_columns = nan_counts[nan_counts == len(new_data)].index.tolist()
-if all_nan_columns:
-    print("Warning: The following columns have all NaN values in the new_data DataFrame:")
-    print(all_nan_columns)
-
-    # Save only the columns with all NaN values to a separate file for further investigation
-    nan_data = new_data[all_nan_columns]
-    nan_data.to_csv(nan_file_path, index=False)
-    print(f"All-NaN columns data saved to {nan_file_path}")
-    
-    # Drop all NaN columns (for now)
-    new_data = new_data.drop(all_nan_columns, axis=1)
-
-else:
-    print("No columns with all NaN values found in the new_data DataFrame.")
-
-
-# Checking for columns that may be duplicates of each other
-print("\nChecking for duplicate columns...")
-for col1 in new_data.columns: 
-    for col2 in new_data.columns: 
-        if col1 != col2 and (col1.startswith(col2)): 
-            print(f"Warning: should {col1} and {col2} be the same column?")
-print()
-# Save the new_data DataFrame to a new file
-new_data.to_csv(age_output_file_path, index=False)
-print(f"Cleaned data saved to {age_output_file_path}")
+            # If the column name is in the poorly named columns dictionary, rename it with the better name
+            if column_name in poorly_named_columns:
+                column_name = poorly_named_columns[column_name]
+            
 
 
 
 
-# 2b. Interpolating the data to fill missing values
-# --- Interpolation and Filling Missing Values for Ages 0–19 ---
+            # # FOR TESTING PURPOSES: continue if not in the special columns for testing
+            # if column_name not in special_columns_for_testing:
+            #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
+            #     continue
 
-print("Interpolating data...")
-# Separate pre-birth (age -1) data from post-birth (age 0-19) data for later recombination
-pre_birth_rows = new_data[new_data['age'] == -1].copy()
-age_panel = new_data[(new_data['age'] >= 0) & (new_data['age'] <= 19)].copy()
+            
+            
+            
+            
+            
+
+            # Check if the column already exists in new_data
+            if column_name not in new_data.columns:
+                # If not, create it with NaN values
+                new_data[column_name] = np.nan
+            
+            
+            # Efficiently map mother data to child data for this column and year
+            # Create a mapping from child id to (CYRB_XRND, MPUBID_XRND)
+            id_to_birthyear = nls_data.set_index('id')['CYRB_XRND'].to_dict()
+            id_to_motherid = nls_data.set_index('id')['MPUBID_XRND'].to_dict()
+            # Create a mapping from mother id to column value
+            mother_col_map = mother_data.set_index('CASEID_1979')[column].to_dict()
+
+            # For all children, compute the child's age at this year and the value from mother data
+            ids = new_data['id'].unique()
+            child_ages = {id_: year - id_to_birthyear[id_] for id_ in ids}
+            mother_values = {id_: mother_col_map.get(id_to_motherid[id_], np.nan) for id_ in ids}
+
+            # Assign values in one go
+            mask = new_data['age'] == new_data['id'].map(child_ages)
+            new_data.loc[mask, column_name] = new_data.loc[mask, 'id'].map(mother_values)
 
 
-# Replacing any negative values in the data with "NaN"
-age_panel = age_panel.replace(np.arange(-100, 0), np.nan)
-print(f"Replaced all integers from -100 to 0 in post-birth values with NaN values")
+            # Ensure we have a pre-birth age (-1) value for each child for the column
+            if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
+                # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
+                # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
+                negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name] >= 0)]['age']
+                if not negative_ages.empty:
+                    greatest_negative_age = negative_ages.max()
+                    # Fill in the value for the corresponding age -1
+                    for id in new_data['id'].unique():
+                        new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
+                
 
-# Replace all negative values with np.nan EXCEPT the "-1" values in the "age" column
-for col in new_data.columns:
-    if col == 'age':
-        continue
-    else:
-        pre_birth_rows.loc[pre_birth_rows[col] < 0, col] = np.nan
-        age_panel.loc[age_panel[col] < 0, col] = np.nan
-print(f"Replaced all negative values with NaN, except -1 in the 'age' column")
-
-
-# Sort by child and age for proper interpolation
-age_panel = age_panel.sort_values(['id', 'age'])
-
-# Interpolate missing values for each child using cubic interpolation if possible, otherwise linear
-def interpolate_child_data(child_df):
-    interpolated = child_df.copy()
-    value_columns = [col for col in child_df.columns if col not in ['id', 'age']]
-    # Use cubic if enough points, else fallback to linear
-    for col in value_columns:
-        non_nan_count = child_df[col].notna().sum()
-        if non_nan_count >= 4:
-            interpolated[col] = child_df[col].interpolate(method='cubic', limit_direction='both')
-        elif non_nan_count >= 2:
-            interpolated[col] = child_df[col].interpolate(method='linear', limit_direction='both')
-        elif non_nan_count == 1:
-            interpolated[col] = child_df[col]
+        # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
         else: 
-            interpolated[col] = np.nan
-    return interpolated
-
-interpolated_panel = (
-    age_panel.groupby('id', group_keys=False)
-    .apply(interpolate_child_data)
-    .reset_index(drop=True)
-)
-
-# Fill any remaining edge NaNs by carrying forward/backward the nearest valid value
-def fill_edges(child_df):
-    filled = child_df.copy()
-    value_columns = [col for col in child_df.columns if col not in ['id', 'age']]
-    filled[value_columns] = filled[value_columns].ffill().bfill()
-    return filled
-
-final_age_panel = (
-    interpolated_panel.groupby('id', group_keys=False)
-    .apply(fill_edges)
-    .reset_index(drop=True)
-)
-
-# Combine interpolated ages 0–19 with pre-birth rows, and sort
-new_data_interpolated = pd.concat([pre_birth_rows, final_age_panel], ignore_index=True).sort_values(['id', 'age'])
-
-# --- End Interpolation Section ---
-
-# Ensure there are no columns with all NaN values
+            # Put out a warning if column doesn't end with XRND
+            if not column.endswith("XRND"):
+                print(f"Column {column} does not end with 'XRND'. It will be added to all ages for each child.")
+            # Add the mother's XRND variable to all ages for each child
+            # First, map CASEID_1979 to id
+            mother_id = mother_data['CASEID_1979']
+            mother_col = mother_data[column]
+            # Create a mapping from CASEID_1979 to the column value
+            mother_map = dict(zip(mother_id, mother_col))
+            # Fill in the value for all ages for each child
+            new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
 
 
-# 3. Create the child by period table
+    # Renaming columns
+    for column in new_data.columns:
+        if column in better_named_columns: 
+            # If the column is in the better named columns dictionary, rename it with the better name
+            new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
 
 
-# Create the period data
-period_data = aggregate_period_data(new_data_interpolated, age_periods)
+    # Rescale columns
+    # Rescale columns according to rescaling_variables
+    print("Rescaling columns...")
+    for column in new_data.columns:
+        if column in rescaling_variables:
+            old_values = np.arange(1, len(rescaling_variables[column]) + 1)
+            new_values = rescaling_variables[column]
+            new_data[column] = new_data[column].replace(dict(zip(old_values, new_values)))
+            # print(f"Rescaled column {column}")
+
+    # Rescale columns according to rescaling_variables_by_age
+    for entry in rescaling_variables_by_age:
+        col_name, (start_age, end_age), new_values = entry
+        old_values = np.arange(1, len(new_values) + 1)
+        mask = (new_data['age'] >= start_age) & (new_data['age'] <= end_age)
+        if col_name in new_data.columns:
+            new_data.loc[mask, col_name] = new_data.loc[mask, col_name].replace(dict(zip(old_values, new_values)))
+            # print(f"Rescaled column {col_name} for ages {start_age}-{end_age}")
 
 
-# Print the first few rows of the period data to verify
-print("Created period data. Here are the first few rows:")
-print(period_data.head())
-
-# Provide a summary of the period data
-print("\nSummary of period data:")
-print(period_data.describe(include='all'))
-period_data.describe(include='all').to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv", mode='w')
-print("Summary of period data saved")
-
-
-# Print all the columns in the period data
-print("\nColumns in the period data:")
-print(period_data.columns.tolist())
+    # Rescale columns according to inflation adjustment
+    CPI_values = get_CPI_values(CPI_file_path)
+    for column in new_data.columns: 
+        if column in INFLATION_ADJUSTED_COLUMNS: 
+            # Rescale the column by the CPI value
+            new_data[column] = new_data.apply(
+                lambda row: row[column] * (CPI_values.get(row['year'], 1) / CPI_values.get(1979, 1)),
+                axis=1
+            )
 
 
-# 3a. Running Checks
+    # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
+    new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
 
-# Checking to see if there are any negative values in the data that are not -7 or -1
-negative_values = period_data[period_data < 0].dropna(how='all')
-negative_values = negative_values[negative_values != -7]
-negative_values = negative_values[negative_values != -1]
-if not negative_values.empty:
-    print("Warning: The following negative values were found in the period_data DataFrame (excluding -7 and -1):")
-    print(negative_values)
 
-# Temporary check: printing inflation-adjusted columns
-print("Here are columns to check out")
-print(period_data[INFLATION_ADJUSTED_COLUMNS].head(10))
+    # 2a. Running some checks on the new_data DataFrame and saving it to a new file
 
-# Checking to see if there are any columns with all NaN values
-nan_counts = period_data.isna().sum()
-all_nan_columns = nan_counts[nan_counts == len(period_data)].index.tolist()
-if all_nan_columns:
-    print("Warning: The following columns have all NaN values in the period_data DataFrame:")
-    print(all_nan_columns)
+    # Check for nan values in the new_data DataFrame. If such values exist, print the number of nan values and the columns they are in
+    nan_counts = new_data.isna().sum()
+    # Identify columns where all values are NaN
+    all_nan_columns = nan_counts[nan_counts == len(new_data)].index.tolist()
+    if all_nan_columns:
+        print("Warning: The following columns have all NaN values in the new_data DataFrame:")
+        print(all_nan_columns)
+
+        # Save only the columns with all NaN values to a separate file for further investigation
+        nan_data = new_data[all_nan_columns]
+        nan_data.to_csv(nan_file_path, index=False)
+        print(f"All-NaN columns data saved to {nan_file_path}")
+        
+        # Drop all NaN columns (for now)
+        new_data = new_data.drop(all_nan_columns, axis=1)
+
+    else:
+        print("No columns with all NaN values found in the new_data DataFrame.")
+
+
+    # Checking for columns that may be duplicates of each other
+    print("\nChecking for duplicate columns...")
+    for col1 in new_data.columns: 
+        for col2 in new_data.columns: 
+            if col1 != col2 and (col1.startswith(col2)): 
+                print(f"Warning: should {col1} and {col2} be the same column?")
+    print()
+    # Save the new_data DataFrame to a new file
+    new_data.to_csv(age_output_file_path, index=False)
+    print(f"Cleaned data saved to {age_output_file_path}")
+
+
+
+
+    # 2b. Interpolating the data to fill missing values
+    # --- Interpolation and Filling Missing Values for Ages 0–19 ---
+
+    print("Interpolating data...")
+    # Separate pre-birth (age -1) data from post-birth (age 0-19) data for later recombination
+    pre_birth_rows = new_data[new_data['age'] == -1].copy()
+    age_panel = new_data[(new_data['age'] >= 0) & (new_data['age'] <= 19)].copy()
+
+
+
+    # Replace all negative values with np.nan EXCEPT the "-1" values in the "age" column
+    for col in new_data.columns:
+        if col == 'age':
+            continue
+        else:
+            pre_birth_rows.loc[pre_birth_rows[col] < 0, col] = np.nan
+            age_panel.loc[age_panel[col] < 0, col] = np.nan
+    print(f"Replaced all negative values with NaN, except -1 in the 'age' column")
+
+
+
+    # Sort by child and age for proper interpolation
+    age_panel = age_panel.sort_values(['id', 'age'])
+
+    # Interpolate missing values for each child using cubic interpolation if possible, otherwise linear
+    def interpolate_child_data(child_df):
+        interpolated = child_df.copy()
+        value_columns = [col for col in child_df.columns if col not in ['id', 'age']]
+        # Use cubic if enough points, else fallback to linear
+        for col in value_columns:
+            non_nan_count = child_df[col].notna().sum()
+            if non_nan_count >= 4:
+                interpolated[col] = child_df[col].interpolate(method='cubic', limit_direction='both', limit_area='inside')
+            elif non_nan_count >= 2:
+                interpolated[col] = child_df[col].interpolate(method='linear', limit_direction='both', limit_area='inside')
+            elif non_nan_count == 1:
+                interpolated[col] = child_df[col]
+            else: 
+                interpolated[col] = np.nan
+        return interpolated
+
+    interpolated_panel = (
+        age_panel.groupby('id', group_keys=False)
+        .apply(interpolate_child_data)
+        .reset_index(drop=True)
+    )
+
+    # Fill any remaining edge NaNs by carrying forward/backward the nearest valid value
+    def fill_edges(child_df):
+        filled = child_df.copy()
+        value_columns = [col for col in child_df.columns if col not in ['id', 'age']]
+        filled[value_columns] = filled[value_columns].ffill().bfill()
+        return filled
+
+    final_age_panel = (
+        interpolated_panel.groupby('id', group_keys=False)
+        .apply(fill_edges)
+        .reset_index(drop=True)
+    )
+
+    # Combine interpolated ages 0–19 with pre-birth rows, and sort
+    new_data_interpolated = pd.concat([pre_birth_rows, final_age_panel], ignore_index=True).sort_values(['id', 'age'])
+
+    # --- End Interpolation Section ---
+
+    # TODO: floor the data at zero
+    new_data_interpolated
+
+
+    # 3. Create the child by period table
+
+    # DEBUGGING: testing whether there are negative values in this part of the data
+    for col in new_data_interpolated.columns:
+        if not new_data_interpolated.loc[new_data_interpolated[col] < 0, col].empty: 
+            print(f"Column {col} contains negative values from interpolation!")
+
+    # Create a graph to show how interpolation is giving negative values
+    # import matplotlib.pyplot as plt
+
+    # column_to_examine = 'HGC_OF_MOTHER_AS_OF_MAY_1_R'
+    # child_to_examine = new_data_interpolated.loc[new_data_interpolated[column_to_examine] < 0, 'id'].values[1]
+    # x = new_data_interpolated.loc[new_data_interpolated['id'] == child_to_examine]['year'].values
+    # y = new_data_interpolated.loc[new_data_interpolated['id'] == child_to_examine][column_to_examine].values
+    # actual_points = new_data.loc[new_data['id'] == child_to_examine][column_to_examine].values
+    # plt.plot(x, y)
+    # plt.scatter(x, actual_points)
+    # plt.show()
+
+    # Create the period data
+    period_data = aggregate_period_data(new_data_interpolated, age_periods)
+
+
+    # Print the first few rows of the period data to verify
+    print("Created period data. Here are the first few rows:")
+    print(period_data.head())
+
+
+    # Print all the columns in the period data
+    print("\nColumns in the period data:")
+    print(period_data.columns.tolist())
+
+
+    # 3a. Running Checks
+
+
+
+    # Temporary check: printing inflation-adjusted columns
+    print("Here are columns to check out")
+    print(period_data[INFLATION_ADJUSTED_COLUMNS].head(10))
+
+    # Checking to see if there are any columns with all NaN values
+    nan_counts = period_data.isna().sum()
+    all_nan_columns = nan_counts[nan_counts == len(period_data)].index.tolist()
+    if all_nan_columns:
+        print("Warning: The following columns have all NaN values in the period_data DataFrame:")
+        print(all_nan_columns)
+        
+        # Drop all NaN columns (for now)
+        period_data = period_data.drop(all_nan_columns, axis=1)
+
+    else:
+        print("No columns with all NaN values found in the period_data DataFrame.")
+
+
+    # TODO: check for "bad" columns
+
+    # Count the number of full rows gained from dropping each column
+    gain_from_column_drop = {}
+    initial_full_rows = period_data.copy().dropna(inplace=False).shape[0]
+    print(f"Initial full rows: {initial_full_rows}")
+    # Exclude 'id' and 'period' columns from the loop
+    columns_to_check = [col for col in period_data.columns if col not in ['id', 'period']]
+    for col in columns_to_check:
+        dropped = period_data.copy().drop(columns=[col])
+        full_rows = dropped.dropna().shape[0]
+        gain_from_column_drop[col] = full_rows - initial_full_rows
+    print("Rows gained from dropping each column (full rows only):")
+    results = []
+    for col, gain in gain_from_column_drop.items():
+        results.append(f"{col}: {gain}")
+    print("\n".join(results))
     
-    # Drop all NaN columns (for now)
-    period_data = period_data.drop(all_nan_columns, axis=1)
-
-else:
-    print("No columns with all NaN values found in the period_data DataFrame.")
 
 
+        
+    # Actually dropping columns
+    period_data.drop(columns=columns_to_drop)
 
-# Save data to csv
-period_data.to_csv(period_output_file_path, index=False)
-print(f"Period data saved to {period_output_file_path}")
 
-# Save constants to a separate file
-with open(f"{period_output_file_path[:-4]}_CONSTANTS.txt", "w") as f:
-    f.write(f"SHORTEN_DATA: {SHORTEN_DATA} \n")
-    f.write(f"NUMBER_OF_ROWS_TESTING: {NUMBER_OF_ROWS_TESTING} \n")
-    f.write(f"PREBIRTH_AGES_PER_CHILD: {PREBIRTH_AGES_PER_CHILD} \n")
-    f.write("\n\n")
-    f.write(f"SEVERAL_TIMES_PER_YEAR: {SEVERAL_TIMES_PER_YEAR} \n")
-    f.write(f"SEVERAL_TIMES_PER_MONTH: {SEVERAL_TIMES_PER_MONTH} \n")
-    f.write(f"MORE_THAN_ONCE_PER_DAY: {MORE_THAN_ONCE_PER_DAY} \n")
-    f.write(f"WEEKS_PER_MONTH: {WEEKS_PER_MONTH} \n")
-    f.write("\n\n")
-    f.write("age_periods: \n")
-    for key, value in age_periods.items():
-        f.write(f"{key}: {value}\n")
+
+
+    # Save data to csv
+    period_data.to_csv(period_output_file_path, index=False)
+    print(f"Period data saved to {period_output_file_path}")
+
+    # Print and save description stats to csv
+    print("\nSummary of period data:")
+    print(period_data.describe(include='all'))
+    period_data_stats = period_data.describe(include='all').transpose()
+    period_data_stats["Category"] = np.nan
+    print(period_data.columns.to_list())
+    for category, column_names in categories_of_variables.items(): 
+        for column in column_names: 
+            period_data_stats["Category"].iloc[period_data.columns.to_list().index(column)] = category
+        
+    period_data_stats.to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv", mode='w')
+    print("Summary of period data saved")
+
+    # Save constants to a separate file
+    with open(f"{period_output_file_path[:-4]}_CONSTANTS.txt", "w") as f:
+        f.write(f"SHORTEN_DATA: {SHORTEN_DATA} \n")
+        f.write(f"NUMBER_OF_ROWS_TESTING: {NUMBER_OF_ROWS_TESTING} \n")
+        f.write(f"PREBIRTH_AGES_PER_CHILD: {PREBIRTH_AGES_PER_CHILD} \n")
+        f.write("\n\n")
+        f.write(f"SEVERAL_TIMES_PER_YEAR: {SEVERAL_TIMES_PER_YEAR} \n")
+        f.write(f"SEVERAL_TIMES_PER_MONTH: {SEVERAL_TIMES_PER_MONTH} \n")
+        f.write(f"MORE_THAN_ONCE_PER_DAY: {MORE_THAN_ONCE_PER_DAY} \n")
+        f.write(f"WEEKS_PER_MONTH: {WEEKS_PER_MONTH} \n")
+        f.write("\n\n")
+        f.write("age_periods: \n")
+        for key, value in age_periods.items():
+            f.write(f"{key}: {value}\n")
 
 
 # End of the script
+
+if __name__ == "__main__": 
+    main()
