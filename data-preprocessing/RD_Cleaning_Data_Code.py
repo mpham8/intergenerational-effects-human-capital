@@ -47,7 +47,7 @@ from categories_of_variables import categories_of_variables
 
 # Input files 
 nls_file_path = 'data-preprocessing/Initial_Preprocessing/06-23-25-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-05-mother-simple-renamed.csv'  # File containing mother data, update this path as needed
+mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-24-25-mother-renamed.csv'  # File containing mother data, update this path as needed
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
@@ -71,9 +71,9 @@ SEVERAL_TIMES_PER_WEEK = 4
 MORE_THAN_ONCE_PER_DAY = 2
 WEEKS_PER_MONTH = 4.345
 
-INFLATION_ADJUSTED_COLUMNS = ["TNFI_TRUNC", "TOTAL_FAMILY_INCOME_FR_ALL", "FAMILY_INCOME_FROM_ALL_SOUR"]
+INFLATION_ADJUSTED_COLUMNS = ["TNFI_TRUNC", "TOTAL_FAMILY_INCOME_FR_ALL", "FAMILY_INCOME_FROM_ALL_SOUR", "LABOR_INCOME"]
 
-# TODO: create labor income variable
+
 
 # Age periods dictionary
 age_periods = {
@@ -85,7 +85,7 @@ age_periods = {
 }
 
 columns_to_drop = {
-    "Q2_15C", 
+    # "Q2_15C", 
     "Q2_15A_PRE", 
     "VERSION_R29_XRND", 
     "TYPE_OF_SCHOOL_RECODE", 
@@ -93,6 +93,9 @@ columns_to_drop = {
     "MOM_RACE_ID", 
     "MOM_SEX", 
     "DOES_CHILD_NEVER_USE", 
+    'TOTAL_FAMILY_INCOME_FR_ALL', 
+    'FAMILY_INCOME_FROM_ALL_SOUR', 
+
 }
 
 
@@ -186,7 +189,10 @@ poorly_named_columns = {
     'MAR_10B' : 'Q2_15B',
     'MUSICAL_INSTMT_CH' : 'MUSIC_INSTMT_CH', 
     'CH_GET_SPEC_LESSONS' : 'CH_GET_SPEC_LESSON', 
-    'HIGHEST_GRADE_R_HAS_COMPLET' : 'HIGHEST_GRADE_OF_REGULAR_SC'
+    'HIGHEST_GRADE_R_HAS_COMPLET' : 'HIGHEST_GRADE_OF_REGULAR_SC', 
+    'Q13_5_TRUNC' : 'Q13_5', 
+    'Q13_5_TRUNC_REVISED' : 'Q13_5', 
+    
     # NOTE: combine Q2_15A and Q2_15A_PRE?
 }
 
@@ -209,6 +215,7 @@ better_named_columns = {
     'PIAT_READ_COMP_TOTAL_RAW_SC' : 'PIAT_READ_COMP', 
     'PPVT_TOTAL_RAW_SCORE' : 'PPVT', 
     'HIGHEST_GRADE_OF_REGULAR_SC' : 'HGC_YEARLY_CHILD', # NOTE: does this column need to be processed differently? It's the only column in "Educational Attainment" that's not XRND (i.e., across the whole file)
+    'Q13_5' : 'LABOR_INCOME', 
 }
 
 # If over time, all variables will be rescaled to per week (easiest to do)
@@ -872,6 +879,10 @@ def main():
         f.write("age_periods: \n")
         for key, value in age_periods.items():
             f.write(f"{key}: {value}\n")
+        f.write("columns_to_drop: [ \n")
+        for column in columns_to_drop: 
+            f.write(f"{column} \n")
+        f.write("] \n")
 
 
 # End of the script
