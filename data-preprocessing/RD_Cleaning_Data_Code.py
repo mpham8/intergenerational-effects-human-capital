@@ -73,8 +73,7 @@ WEEKS_PER_MONTH = 4.345
 
 INFLATION_ADJUSTED_COLUMNS = ["TNFI_TRUNC", "TOTAL_FAMILY_INCOME_FR_ALL", "FAMILY_INCOME_FROM_ALL_SOUR"]
 
-
-
+# TODO: create labor income variable
 
 # Age periods dictionary
 age_periods = {
