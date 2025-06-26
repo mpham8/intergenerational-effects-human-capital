@@ -5,11 +5,24 @@ import pandas as pd
 from itertools import product
 
 
-def solve_household(rho_val, rho_e_val, h_val): 
-    c1, e1, l1, h2, predh5final = solve_bounded_system_t1(rho_val, rho_e_val, h_val)
-    c2, e2, l2, h3 = solve_bounded_system_t2(rho_val, rho_e_val, h2, h_val)
-    c3, e3, l3, h4 = solve_bounded_system_t3(rho_val, rho_e_val, h3, h_val)
-    c4, e4, l4, h5 = solve_bounded_system_t4(rho_val, rho_e_val, h4, h_val)
+# Empirically known parameters
+beta    = 0.96 # discount factor
+gamma_  = 2 # Disutility of Leisure
+eta     = 2.0 # Risk aversion
+phi     = 0.5 # Public-Private Share (Jang & Yum, 2021)
+psi     = 0.3 # Public-Private Elasticity of Sub. ψ ≤ 1 (Jang & Yum, 2021)
+xi = 2 # I made this up, placeholder removing in future iterations with simpler specification
+alpha   = 3 # I made this up, placeholder removing in future iterations with simpler specification
+e_bar = 0.1 # Average share of income allocated to parental education investment 
+g_bar = 0.01375 # Average US public education expenditure as a share of GDP
+eps1, eps2, eps3, eps4 = 1, 1, 1, 1 # Parental productivity
+G1, G2, G3, G4         = 1, 1, 1, 1 # Public education productivity
+
+def solve_household(parameters, household): 
+    c1, e1, l1, h2, predh5final = solve_bounded_system_t1(parameters, household)
+    c2, e2, l2, h3 = solve_bounded_system_t2(parameters, household, h2)
+    c3, e3, l3, h4 = solve_bounded_system_t3(parameters, household, h3)
+    c4, e4, l4, h5 = solve_bounded_system_t4(parameters, household, h4)
     return np.array([
         [c1, e1, l1, h2],
         [c2, e2, l2, h3],
@@ -19,28 +32,15 @@ def solve_household(rho_val, rho_e_val, h_val):
 
 
 
-def solve_bounded_system_t1(rho, rho_e, h):
-    alpha   = 3
-    beta    = 0.96
-    gamma_  = 2
-    delta   = 30
-    phi     = 0.5
-    psi     = 0.3
-    # rho     = -0.1
-    eta     = 2.0
-    xi = 2
-    e_bar = 0.1
-    g_bar = 0.0495/4
+def solve_bounded_system_t1(parameters, household):
+    delta   = parameters[0]
+    rho = parameters[1]
+    rho_e = parameters[2]
+    theta1, theta2, theta3, theta4 = parameters[3:]
 
-    w1, w2, w3, w4 = 1.0, 1.072, 1.149, 1.233 #1.4% real wage growth per year
-    # h      = 1
-
-    eps1, eps2, eps3, eps4 = 2, 1.5, 1, 1
-    # eps1, eps2, eps3, eps4 = 1, 1, 1, 1
-
-    G1, G2, G3, G4         = 1, 1, 1, 1
-    g1, g2, g3, g4         = 0.0005, 0.019, 0.017, 0.013
-    theta1, theta2, theta3, theta4 = 0.6, 0.35, 0.25, 0.15
+    h = household[0, 0] # zeroth period, zeroth column
+    w1, w2, w3, w4 = household[:, 1]
+    g1, g2, g3, g4 = household[:, 2]
 
 
     # If h1^rho is a constant
@@ -179,7 +179,7 @@ def solve_bounded_system_t1(rho, rho_e, h):
                 best_sol = sol
                 
             # Print progress for each guess
-            print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
+            # print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
         except Exception as e:
             print(f"Failed with guess {guess}: {str(e)}")
             continue
@@ -188,7 +188,7 @@ def solve_bounded_system_t1(rho, rho_e, h):
     
     # If all solutions are at the lower bound, try a different approach
     if best_sol is not None and np.allclose(best_sol.x, bounds_lower):
-        print("\nTrying a different approach with relaxed bounds...")
+        # print("\nTrying a different approach with relaxed bounds...")
         # Try with slightly relaxed lower bounds
         relaxed_bounds_lower = [min_l - 0.05, min_l - 0.05, min_l - 0.05, min_l - 0.05]
         
@@ -217,42 +217,42 @@ def solve_bounded_system_t1(rho, rho_e, h):
         sol = best_sol
     
     if sol.success:
-        print("\nSuccess!")
-        print("Solution l1,l2,l3,l4 =", sol.x)
-        print("Residuals =", system_resid(sol.x))
-        print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
+        # print("\nSuccess!")
+        # print("Solution l1,l2,l3,l4 =", sol.x)
+        # print("Residuals =", system_resid(sol.x))
+        # print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
         
-        # Add more diagnostics
-        print("\nDiagnostics:")
-        print("Number of function evaluations:", sol.nfev)
-        print("Termination reason:", sol.message)
+        # # Add more diagnostics
+        # print("\nDiagnostics:")
+        # print("Number of function evaluations:", sol.nfev)
+        # print("Termination reason:", sol.message)
         
         # Check if solution is at bounds
         at_lower = np.isclose(sol.x, bounds_lower)
         at_upper = np.isclose(sol.x, bounds_upper)
-        if any(at_lower) or any(at_upper):
-            print("\nWarning: Solution is at bounds:")
-            for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
-                if np.isclose(val, lower):
-                    print(f"l{i+1} is at lower bound ({lower})")
-                if np.isclose(val, upper):
-                    print(f"l{i+1} is at upper bound ({upper})")
+        # if any(at_lower) or any(at_upper):
+        #     print("\nWarning: Solution is at bounds:")
+        #     for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
+        #         if np.isclose(val, lower):
+        #             print(f"l{i+1} is at lower bound ({lower})")
+        #         if np.isclose(val, upper):
+        #             print(f"l{i+1} is at upper bound ({upper})")
                     
         # Calculate and print e_t, c_t values and final h5c
-        print("\nCalculated e_t values:")
-        print(f"e1 = {e_t_star(sol.x[0], w1)}")
-        print(f"e2 = {e_t_star(sol.x[1], w2)}")
-        print(f"e3 = {e_t_star(sol.x[2], w3)}")
-        print(f"e4 = {e_t_star(sol.x[3], w4)}")
+        # print("\nCalculated e_t values:")
+        # print(f"e1 = {e_t_star(sol.x[0], w1)}")
+        # print(f"e2 = {e_t_star(sol.x[1], w2)}")
+        # print(f"e3 = {e_t_star(sol.x[2], w3)}")
+        # print(f"e4 = {e_t_star(sol.x[3], w4)}")
         
-        print("\nCalculated c_t values:")
-        print(f"c1 = {c_t_star(sol.x[0], w1)}")
-        print(f"c2 = {c_t_star(sol.x[1], w2)}")
-        print(f"c3 = {c_t_star(sol.x[2], w3)}")
-        print(f"c4 = {c_t_star(sol.x[3], w4)}")
+        # print("\nCalculated c_t values:")
+        # print(f"c1 = {c_t_star(sol.x[0], w1)}")
+        # print(f"c2 = {c_t_star(sol.x[1], w2)}")
+        # print(f"c3 = {c_t_star(sol.x[2], w3)}")
+        # print(f"c4 = {c_t_star(sol.x[3], w4)}")
         
         predh5final = h5c(sol.x[0], sol.x[1], sol.x[2], sol.x[3])
-        print(f"\nFinal h5c value = {predh5final}")
+        # print(f"\nFinal h5c value = {predh5final}")
     else:
         print("No solution found with bounding approach. Message:", sol.message)
 
@@ -265,32 +265,22 @@ def solve_bounded_system_t1(rho, rho_e, h):
 
 
 
-def solve_bounded_system_t2(rho, rho_e, h2, h):
-    alpha   = 3
-    beta    = 0.96
-    gamma_  = 2
-    delta   = 30
-    phi     = 0.5
-    psi     = 0.3
-    # rho     = -0.1
-    eta     = 2.0
-    xi = 2
-    e_bar = 0.1
-    g_bar = 0.0495/4
+def solve_bounded_system_t2(parameters, household, h2):
+    delta   = parameters[0]
+    rho = parameters[1]
+    rho_e = parameters[2]
+    theta1, theta2, theta3, theta4 = parameters[3:]
 
-    w1, w2, w3, w4 = 1.0, 1.072, 1.149, 1.233 #1.4% real wage growth per year
-    # h      = 1
-
-    eps1, eps2, eps3, eps4 = 2, 1.5, 1, 1
-    # eps1, eps2, eps3, eps4 = 1, 1, 1, 1
-
-    G1, G2, G3, G4         = 1, 1, 1, 1
-    g1, g2, g3, g4         = 0.0005, 0.019, 0.017, 0.013
-    theta1, theta2, theta3, theta4 = 0.6, 0.35, 0.25, 0.15
+    h = household[0, 0] # zeroth period, zeroth column
+    w1, w2, w3, w4 = household[:, 1]
+    g1, g2, g3, g4 = household[:, 2]
 
 
     # If h1^rho is a constant
     h1_rho = 1.0
+
+
+
 
     def c_t_star(lt, wt):
         return ((1.0 - lt) * wt * h) / gamma_
@@ -453,7 +443,7 @@ def solve_bounded_system_t2(rho, rho_e, h2, h):
                 best_sol = sol
                 
             # Print progress for each guess
-            print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
+            # print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
         except Exception as e:
             print(f"Failed with guess {guess}: {str(e)}")
             continue
@@ -462,7 +452,7 @@ def solve_bounded_system_t2(rho, rho_e, h2, h):
     
     # If all solutions are at the lower bound, try a different approach
     if best_sol is not None and np.allclose(best_sol.x, bounds_lower):
-        print("\nTrying a different approach with relaxed bounds...")
+        # print("\nTrying a different approach with relaxed bounds...")
         # Try with slightly relaxed lower bounds
         relaxed_bounds_lower = [min_l - 0.05, min_l - 0.05, min_l - 0.05]
         
@@ -483,7 +473,7 @@ def solve_bounded_system_t2(rho, rho_e, h2, h):
                     best_norm = norm
                     best_sol = sol
                     
-                print(f"Relaxed bounds - Guess {guess}: norm = {norm}, solution = {sol.x}")
+                # print(f"Relaxed bounds - Guess {guess}: norm = {norm}, solution = {sol.x}")
             except Exception as e:
                 print(f"Failed with relaxed bounds and guess {guess}: {str(e)}")
                 continue
@@ -491,38 +481,38 @@ def solve_bounded_system_t2(rho, rho_e, h2, h):
         sol = best_sol
     
     if sol.success:
-        print("\nSuccess!")
-        print("Solution l2,l3,l4 =", sol.x)
-        print("Residuals =", system_resid(sol.x))
-        print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
+        # print("\nSuccess!")
+        # print("Solution l2,l3,l4 =", sol.x)
+        # print("Residuals =", system_resid(sol.x))
+        # print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
         
-        # Add more diagnostics
-        print("\nDiagnostics:")
-        print("Number of function evaluations:", sol.nfev)
-        print("Termination reason:", sol.message)
+        # # Add more diagnostics
+        # print("\nDiagnostics:")
+        # print("Number of function evaluations:", sol.nfev)
+        # print("Termination reason:", sol.message)
         
         # Check if solution is at bounds
         at_lower = np.isclose(sol.x, bounds_lower)
         at_upper = np.isclose(sol.x, bounds_upper)
-        if any(at_lower) or any(at_upper):
-            print("\nWarning: Solution is at bounds:")
-            for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
-                if np.isclose(val, lower):
-                    print(f"l{i+1} is at lower bound ({lower})")
-                if np.isclose(val, upper):
-                    print(f"l{i+1} is at upper bound ({upper})")
+        # if any(at_lower) or any(at_upper):
+        #     print("\nWarning: Solution is at bounds:")
+        #     for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
+        #         if np.isclose(val, lower):
+        #             print(f"l{i+1} is at lower bound ({lower})")
+        #         if np.isclose(val, upper):
+        #             print(f"l{i+1} is at upper bound ({upper})")
                     
         # Calculate and print e_t, c_t values and final h5c
-        print("\nCalculated e_t values:")
-        print(f"e2 = {e_t_star(sol.x[0], w2)}")
-        print(f"e3 = {e_t_star(sol.x[1], w3)}")
-        print(f"e4 = {e_t_star(sol.x[2], w4)}")
+        # print("\nCalculated e_t values:")
+        # print(f"e2 = {e_t_star(sol.x[0], w2)}")
+        # print(f"e3 = {e_t_star(sol.x[1], w3)}")
+        # print(f"e4 = {e_t_star(sol.x[2], w4)}")
         # print(f"e4 = {e_t_star(sol.x[3], w4)}")
         
-        print("\nCalculated c_t values:")
-        print(f"c2 = {c_t_star(sol.x[0], w2)}")
-        print(f"c3 = {c_t_star(sol.x[1], w3)}")
-        print(f"c4 = {c_t_star(sol.x[2], w4)}")
+        # print("\nCalculated c_t values:")
+        # print(f"c2 = {c_t_star(sol.x[0], w2)}")
+        # print(f"c3 = {c_t_star(sol.x[1], w3)}")
+        # print(f"c4 = {c_t_star(sol.x[2], w4)}")
         # print(f"c4 = {c_t_star(sol.x[3], w4)}")
         
         # print(f"\nFinal h5c value = {h5c(sol.x[0], sol.x[1], sol.x[2])}")
@@ -535,28 +525,17 @@ def solve_bounded_system_t2(rho, rho_e, h2, h):
     return c2star, e2star, sol.x[0], h_3(e2star)
 
 
-def solve_bounded_system_t3(rho, rho_e, h3, h):
-    alpha   = 3
-    beta    = 0.96
-    gamma_  = 2
-    delta   = 30
-    phi     = 0.5
-    psi     = 0.3
-    # rho     = -0.1
-    eta     = 2.0
-    xi = 2
-    e_bar = 0.1
-    g_bar = 0.0495/4
+def solve_bounded_system_t3(parameters, household, h3):
+    # Parameters to optimize
+    delta   = parameters[0]
+    rho = parameters[1]
+    rho_e = parameters[2]
+    theta1, theta2, theta3, theta4 = parameters[3:]
 
-    w1, w2, w3, w4 = 1.0, 1.072, 1.149, 1.233 #1.4% real wage growth per year
-    # h      = 1
-
-    eps1, eps2, eps3, eps4 = 2, 1.5, 1, 1
-    # eps1, eps2, eps3, eps4 = 1, 1, 1, 1
-
-    G1, G2, G3, G4         = 1, 1, 1, 1
-    g1, g2, g3, g4         = 0.0005, 0.019, 0.017, 0.013
-    theta1, theta2, theta3, theta4 = 0.6, 0.35, 0.25, 0.15
+    # Household-level parameters
+    h = household[0, 0] # zeroth period, zeroth column
+    w1, w2, w3, w4 = household[:, 1]
+    g1, g2, g3, g4         = household[:, 2]
 
 
     # If h1^rho is a constant
@@ -723,7 +702,7 @@ def solve_bounded_system_t3(rho, rho_e, h3, h):
                 best_sol = sol
                 
             # Print progress for each guess
-            print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
+            # print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
         except Exception as e:
             print(f"Failed with guess {guess}: {str(e)}")
             continue
@@ -732,7 +711,7 @@ def solve_bounded_system_t3(rho, rho_e, h3, h):
     
     # If all solutions are at the lower bound, try a different approach
     if best_sol is not None and np.allclose(best_sol.x, bounds_lower):
-        print("\nTrying a different approach with relaxed bounds...")
+        # print("\nTrying a different approach with relaxed bounds...")
         # Try with slightly relaxed lower bounds
         relaxed_bounds_lower = [min_l - 0.05, min_l - 0.05]
         
@@ -761,37 +740,37 @@ def solve_bounded_system_t3(rho, rho_e, h3, h):
         sol = best_sol
     
     if sol.success:
-        print("\nSuccess!")
-        print("Solution l3,l4 =", sol.x)
-        print("Residuals =", system_resid(sol.x))
-        print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
+        # print("\nSuccess!")
+        # print("Solution l3,l4 =", sol.x)
+        # print("Residuals =", system_resid(sol.x))
+        # print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
         
-        # Add more diagnostics
-        print("\nDiagnostics:")
-        print("Number of function evaluations:", sol.nfev)
-        print("Termination reason:", sol.message)
+        # # Add more diagnostics
+        # print("\nDiagnostics:")
+        # print("Number of function evaluations:", sol.nfev)
+        # print("Termination reason:", sol.message)
         
         # Check if solution is at bounds
         at_lower = np.isclose(sol.x, bounds_lower)
         at_upper = np.isclose(sol.x, bounds_upper)
-        if any(at_lower) or any(at_upper):
-            print("\nWarning: Solution is at bounds:")
-            for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
-                if np.isclose(val, lower):
-                    print(f"l{i+1} is at lower bound ({lower})")
-                if np.isclose(val, upper):
-                    print(f"l{i+1} is at upper bound ({upper})")
+        # if any(at_lower) or any(at_upper):
+        #     print("\nWarning: Solution is at bounds:")
+        #     for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
+        #         if np.isclose(val, lower):
+        #             print(f"l{i+1} is at lower bound ({lower})")
+        #         if np.isclose(val, upper):
+        #             print(f"l{i+1} is at upper bound ({upper})")
                     
         # Calculate and print e_t, c_t values and final h5c
-        print("\nCalculated e_t values:")
-        print(f"e3 = {e_t_star(sol.x[0], w3)}")
-        print(f"e4 = {e_t_star(sol.x[1], w4)}")
+        # print("\nCalculated e_t values:")
+        # print(f"e3 = {e_t_star(sol.x[0], w3)}")
+        # print(f"e4 = {e_t_star(sol.x[1], w4)}")
         # print(f"e4 = {e_t_star(sol.x[2], w4)}")
         # print(f"e4 = {e_t_star(sol.x[3], w4)}")
         
-        print("\nCalculated c_t values:")
-        print(f"c3 = {c_t_star(sol.x[0], w3)}")
-        print(f"c4 = {c_t_star(sol.x[1], w4)}")
+        # print("\nCalculated c_t values:")
+        # print(f"c3 = {c_t_star(sol.x[0], w3)}")
+        # print(f"c4 = {c_t_star(sol.x[1], w4)}")
         # print(f"c4 = {c_t_star(sol.x[2], w4)}")
         # print(f"c4 = {c_t_star(sol.x[3], w4)}")
         
@@ -804,28 +783,15 @@ def solve_bounded_system_t3(rho, rho_e, h3, h):
     return c3star, e3star, sol.x[0], h_4(e3star)
 
 
-def solve_bounded_system_t4(rho, rho_e, h4, h):
-    alpha   = 3
-    beta    = 0.96
-    gamma_  = 2
-    delta   = 30
-    phi     = 0.5
-    psi     = 0.3
-    # rho     = -0.1
-    eta     = 2.0
-    xi = 2
-    e_bar = 0.1
-    g_bar = 0.0495/4
+def solve_bounded_system_t4(parameters, household, h4):
+    delta   = parameters[0]
+    rho = parameters[1]
+    rho_e = parameters[2]
+    theta1, theta2, theta3, theta4 = parameters[3:]
 
-    w1, w2, w3, w4 = 1.0, 1.072, 1.149, 1.233 #1.4% real wage growth per year
-    # h      = 1
-
-    eps1, eps2, eps3, eps4 = 2, 1.5, 1, 1
-    # eps1, eps2, eps3, eps4 = 1, 1, 1, 1
-
-    G1, G2, G3, G4         = 1, 1, 1, 1
-    g1, g2, g3, g4         = 0.0005, 0.019, 0.017, 0.013
-    theta1, theta2, theta3, theta4 = 0.6, 0.35, 0.25, 0.15
+    h = household[0, 0] # zeroth period, zeroth column
+    w1, w2, w3, w4 = household[:, 1]
+    g1, g2, g3, g4         = household[:, 2]
 
 
     # If h1^rho is a constant
@@ -991,7 +957,7 @@ def solve_bounded_system_t4(rho, rho_e, h4, h):
                 best_sol = sol
                 
             # Print progress for each guess
-            print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
+            # print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
         except Exception as e:
             print(f"Failed with guess {guess}: {str(e)}")
             continue
@@ -1029,36 +995,36 @@ def solve_bounded_system_t4(rho, rho_e, h4, h):
         sol = best_sol
     
     if sol.success:
-        print("\nSuccess!")
-        print("Solution l4 =", sol.x)
-        print("Residuals =", system_resid(sol.x))
-        print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
+        # print("\nSuccess!")
+        # print("Solution l4 =", sol.x)
+        # print("Residuals =", system_resid(sol.x))
+        # print("Norm of residuals =", np.linalg.norm(system_resid(sol.x)))
         
-        # Add more diagnostics
-        print("\nDiagnostics:")
-        print("Number of function evaluations:", sol.nfev)
-        print("Termination reason:", sol.message)
+        # # Add more diagnostics
+        # print("\nDiagnostics:")
+        # print("Number of function evaluations:", sol.nfev)
+        # print("Termination reason:", sol.message)
         
         # Check if solution is at bounds
         at_lower = np.isclose(sol.x, bounds_lower)
         at_upper = np.isclose(sol.x, bounds_upper)
-        if any(at_lower) or any(at_upper):
-            print("\nWarning: Solution is at bounds:")
-            for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
-                if np.isclose(val, lower):
-                    print(f"l{i+1} is at lower bound ({lower})")
-                if np.isclose(val, upper):
-                    print(f"l{i+1} is at upper bound ({upper})")
+        # if any(at_lower) or any(at_upper):
+        #     print("\nWarning: Solution is at bounds:")
+        #     for i, (val, lower, upper) in enumerate(zip(sol.x, bounds_lower, bounds_upper)):
+        #         if np.isclose(val, lower):
+        #             print(f"l{i+1} is at lower bound ({lower})")
+        #         if np.isclose(val, upper):
+        #             print(f"l{i+1} is at upper bound ({upper})")
                     
         # Calculate and print e_t, c_t values and final h5c
-        print("\nCalculated e_t values:")
-        print(f"e3 = {e_t_star(sol.x[0], w4)}")
+        # print("\nCalculated e_t values:")
+        # print(f"e3 = {e_t_star(sol.x[0], w4)}")
         # print(f"e4 = {e_t_star(sol.x[1], w4)}")
         # print(f"e4 = {e_t_star(sol.x[2], w4)}")
         # print(f"e4 = {e_t_star(sol.x[3], w4)}")
         
-        print("\nCalculated c_t values:")
-        print(f"c3 = {c_t_star(sol.x[0], w4)}")
+        # print("\nCalculated c_t values:")
+        # print(f"c3 = {c_t_star(sol.x[0], w4)}")
         # print(f"c4 = {c_t_star(sol.x[1], w4)}")
         # print(f"c4 = {c_t_star(sol.x[2], w4)}")
         # print(f"c4 = {c_t_star(sol.x[3], w4)}")
