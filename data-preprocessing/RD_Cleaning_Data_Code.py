@@ -38,7 +38,8 @@ import numpy as np
 import os
 from categories_of_variables import categories_of_variables
 
-
+# TODO: debug weird variable_age results
+# TODO: normalize alphabet/numbers/colors variables
 
 
 # CONSTANTS
@@ -46,7 +47,7 @@ from categories_of_variables import categories_of_variables
 # File paths
 
 # Input files 
-nls_file_path = 'data-preprocessing/Initial_Preprocessing/06-23-25-renamed.csv'  # Update this path as needed
+nls_file_path = 'data-preprocessing/Initial_Preprocessing/06-26-25-renamed.csv'  # Update this path as needed
 mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-24-25-mother-renamed.csv'  # File containing mother data, update this path as needed
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
@@ -142,6 +143,8 @@ poorly_named_columns = {
     'IS_SCHOOL_GIFTED_HANDICA' : 'IS_SCHOOL_GIFTED_HANDICAPPE', 
     'CHILD_S_AGE_WHEN_1ST_ATTD_H': 'CHILD_AGE_WHEN_1ST_ATTD_HEA', 
     'HOW_LONG_DID_CHILD_ATTEND_H' : 'HOW_LONG_CHILD_WAS_IN_HEAD', 
+    'HOW_LONG_CHILD_ATTENDED_HEA' : 'HOW_LONG_CHILD_WAS_IN_HEAD', 
+    'CHILD_EVER_ENRLD_IN_HEAD_ST' : 'CHILD_EVER_ENROLLED_IN_HEAD', 
     'HOW_OFT_CH_EATS' : 'HOW_OFT_CH_EATS_W', 
     'HOW_OFT_CH_EAT' : 'HOW_OFT_CH_EATS_W', 
     'HOW_OFT_CH_EATS_W_MO' : 'HOW_OFT_CH_EATS_W',
@@ -226,7 +229,9 @@ rescaling_variables = {
     'HOW_OFT_CH_TAKEN_TO_PERFORMANCE' : [0, 1.5/52, SEVERAL_TIMES_PER_YEAR/52, 1/WEEKS_PER_MONTH, 1],
     'HOW_OFT_CH_W_DAD' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan], 
     'HOW_OFT_CH_W_DAD_OUTDOORS' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan],
-    'DO_PARS_DISCUSS_TV' : [0, 1, np.nan]
+    'DO_PARS_DISCUSS_TV' : [0, 1, np.nan], 
+    # This variable below will be rescaled to months
+    'HOW_LONG_CHILD_WAS_IN_HEAD': [(0+3)/2, (3+11)/2, (12+23)/2, 24, np.nan] # NOTE: need help with rescaling
     
 }
 
@@ -382,63 +387,104 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
 def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     """
-    Creates a child-by-period table from a child-by-age panel, excluding the pre-birth period (age = -1) from aggregation.
+    Creates a child-by-period table from a child-by-age panel.
+    For variables in categories_of_variables["Child_Human_Capital"], aggregates using the value at the END of each period.
+    For all other variables, aggregates using the mean over the period.
+    For period -1, uses value at age=0 for Child_Human_Capital variables.
 
     Parameters:
         df (pd.DataFrame): The input DataFrame containing child-by-age data.
         age_periods (dict): A dictionary mapping period numbers to age ranges (start_age, end_age).
 
     Returns:
-        pd.DataFrame: A DataFrame containing interpolated values for each period (except pre-birth), where aggregation is performed by averaging values within each period. The resulting DataFrame includes columns for child ID, period, and other variables.
+        pd.DataFrame: A DataFrame containing values for each period, with Child_Human_Capital variables taken at the period end.
     """
     df = df.copy()
+    # Remove 'year' column if present
+    if 'year' in df.columns:
+        df = df.drop('year', axis=1)
 
-    # Dropping the "year" column (it no longer holds significance)
+    # Get Child_Human_Capital variable list
+    chc_vars = set(categories_of_variables.get("Child_Human_Capital", []))
 
-    if 'year' in df.columns: 
-        df.drop('year', axis=1)
-    # Exclude pre-birth rows (age == -1) from interpolation/aggregation (since the row represents pre-birth values)
+    # Exclude pre-birth rows (age == -1) from aggregation
     pre_birth = df[df['age'] == -1]
     df = df[df['age'] >= 0]
 
-    # Create bins and labels for periods, excluding pre-birth
+    # Prepare period bins and labels (excluding pre-birth)
     non_prebirth_periods = {k: v for k, v in age_periods.items() if v[0] >= 0}
-    # Collect all unique bin edges (start and end+1 for each period)
     bin_edges = []
     for v in non_prebirth_periods.values():
         bin_edges.append(v[0])
         bin_edges.append(v[1] + 1)
     bin_edges = sorted(set(bin_edges))
-    # Ensure bins cover all ages in the data
     min_age = int(df['age'].min())
     max_age = int(df['age'].max()) + 1
     if bin_edges[0] > min_age:
         bin_edges = [min_age] + bin_edges
     if bin_edges[-1] < max_age:
         bin_edges = bin_edges + [max_age]
-    # Remove duplicates and sort
     bin_edges = sorted(set(bin_edges))
-    # Now, labels must be one fewer than bin edges
     period_labels = list(non_prebirth_periods.keys())
 
-    # Assign periods using pd.cut
+    # Assign periods
     df['period'] = pd.cut(df['age'], bins=bin_edges, labels=period_labels, right=False, include_lowest=True)
-
-    # Filter out rows with no period assigned (shouldn't happen, but just in case)
     df = df[df['period'].notna()]
 
-    # Group by child and period, calculating the mean to 
     group_cols = ['id', 'period']
     value_cols = [col for col in df.columns if col not in ['id', 'age', 'period']]
-    period_data = df.groupby(group_cols, as_index=False)[value_cols].mean()
 
+    # Prepare result DataFrame
+    result_rows = []
+
+    # For each child and period, aggregate accordingly
+    for (child_id, period), group in df.groupby(['id', 'period']):
+        period = int(period)
+        period_info = age_periods[period]
+        period_end_age = period_info[1]
+        row = {'id': child_id, 'period': period}
+
+        # For Child_Human_Capital variables: take value at period end age
+        for col in value_cols:
+            if col in chc_vars:
+                # For period -1, use age=0; for others, use period_end_age
+                target_age = 0 if period == -1 else period_end_age
+                val = group.loc[group['age'] == target_age, col]
+                if not val.empty:
+                    row[col] = val.iloc[0]
+                else:
+                    # If no value at target_age, fallback to nearest available in period
+                    if not group[col].dropna().empty:
+                        # Use value at max available age in period
+                        max_age = group.loc[group[col].notna(), 'age'].max()
+                        row[col] = group.loc[group['age'] == max_age, col].iloc[0]
+                    else:
+                        row[col] = np.nan
+            else:
+                # For other variables: mean over the period
+                row[col] = group[col].mean()
+        result_rows.append(row)
+
+    period_data = pd.DataFrame(result_rows)
+
+    # Handle pre-birth period (-1): use age=0 for Child_Human_Capital variables
     if not pre_birth.empty:
-        pre_birth = pre_birth.copy()
-        pre_birth['period'] = -1
-        pre_birth = pre_birth[group_cols + value_cols].sort_values(['id', 'period'])
-        period_data = period_data.sort_values(['id', 'period'])
-        period_data = pd.concat([pre_birth, period_data], ignore_index=True).sort_values(['id', 'period'])
+        pre_birth_rows = []
+        for child_id, group in pre_birth.groupby('id'):
+            row = {'id': child_id, 'period': -1}
+            for col in value_cols:
+                if col in chc_vars:
+                    # Use value at age=0 from df (not pre_birth)
+                    val = df[(df['id'] == child_id) & (df['age'] == 0)][col]
+                    row[col] = val.iloc[0] if not val.empty else np.nan
+                else:
+                    # Use value from pre_birth row
+                    row[col] = group[col].iloc[0]
+            pre_birth_rows.append(row)
+        pre_birth_df = pd.DataFrame(pre_birth_rows)
+        period_data = pd.concat([pre_birth_df, period_data], ignore_index=True)
 
+    period_data = period_data.sort_values(['id', 'period']).reset_index(drop=True)
     return period_data
 
 
@@ -447,6 +493,16 @@ def get_CPI_values(CPI_file_path: str) -> np.ndarray:
     CPI_data['yearly_data'] = CPI_data.iloc[:, 2:].sum(axis=1, numeric_only=True)
     return dict(zip(CPI_data['Year'].values, CPI_data['yearly_data']))
 
+
+def get_age_range(df: pd.DataFrame, column: str) -> tuple:
+    """
+    Returns the (min_age, max_age) for which the specified column has non-NaN and non-negative values in the child-age panel.
+    If all values are NaN or negative, returns (None, None).
+    """
+    valid_ages = df.loc[df[column].notna() & (df[column] >= 0), 'age']
+    if valid_ages.empty:
+        return (None, None)
+    return (valid_ages.min(), valid_ages.max())
 
 # --------------------------------- MAIN SCRIPT -----------------------------------------
 # =======================================================================================
@@ -694,6 +750,15 @@ def main():
     print(f"Cleaned data saved to {age_output_file_path}")
 
 
+    # Create a file to store the age ranges for the variables
+    with open(f"data-preprocessing/Initial_Preprocessing/variable_ages.txt", "w") as f:
+        f.write("variable_ages = { \n")
+        for column in new_data.columns: 
+            min_age, max_age = get_age_range(new_data, column)
+            f.write(f"{column} : ({min_age}, {max_age}) \n")
+
+        f.write("}")
+
 
 
     # 2b. Interpolating the data to fill missing values
@@ -727,9 +792,9 @@ def main():
         # Use cubic if enough points, else fallback to linear
         for col in value_columns:
             non_nan_count = child_df[col].notna().sum()
-            if non_nan_count >= 4:
-                interpolated[col] = child_df[col].interpolate(method='cubic', limit_direction='both', limit_area='inside')
-            elif non_nan_count >= 2:
+            # if non_nan_count >= 4:
+            #     interpolated[col] = child_df[col].interpolate(method='cubic', limit_direction='both', limit_area='inside')
+            if non_nan_count >= 2:
                 interpolated[col] = child_df[col].interpolate(method='linear', limit_direction='both', limit_area='inside')
             elif non_nan_count == 1:
                 interpolated[col] = child_df[col]
@@ -775,8 +840,8 @@ def main():
     # Create a graph to show how interpolation is giving negative values
     # import matplotlib.pyplot as plt
 
-    # column_to_examine = 'HGC_OF_MOTHER_AS_OF_MAY_1_R'
-    # child_to_examine = new_data_interpolated.loc[new_data_interpolated[column_to_examine] < 0, 'id'].values[1]
+    # column_to_examine = 'PIAT_MATH'
+    # child_to_examine = new_data_interpolated.loc[new_data_interpolated[column_to_examine] < 0, 'id'].values[0]
     # x = new_data_interpolated.loc[new_data_interpolated['id'] == child_to_examine]['year'].values
     # y = new_data_interpolated.loc[new_data_interpolated['id'] == child_to_examine][column_to_examine].values
     # actual_points = new_data.loc[new_data['id'] == child_to_examine][column_to_examine].values
@@ -883,6 +948,13 @@ def main():
         for column in columns_to_drop: 
             f.write(f"{column} \n")
         f.write("] \n")
+    
+
+    # Seeing how many people answer the "headstart questions"
+    for column in ["CHILD_EVER_ENROLLED_IN_HEAD", "HOW_LONG_CHILD_WAS_IN_HEAD", "CHILD_AGE_WHEN_1ST_ATTD_HEA"]: 
+        count = new_data.count()[column]
+        total = new_data.count()["id"]
+        print(f"Column {column} has count {count}, being answered for {count/total}")
 
 
 # End of the script

@@ -452,7 +452,7 @@ def solve_bounded_system_t2(parameters, household, h2):
     
     # If all solutions are at the lower bound, try a different approach
     if best_sol is not None and np.allclose(best_sol.x, bounds_lower):
-        # print("\nTrying a different approach with relaxed bounds...")
+        print("\nTrying a different approach with relaxed bounds...")
         # Try with slightly relaxed lower bounds
         relaxed_bounds_lower = [min_l - 0.05, min_l - 0.05, min_l - 0.05]
         

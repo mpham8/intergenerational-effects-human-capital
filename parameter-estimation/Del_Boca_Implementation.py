@@ -123,9 +123,8 @@ def create_households(num_households: int) -> np.ndarray:
 
 
 def solve_households(households: np.ndarray, parameters: list) -> np.ndarray: 
-    # TODO: actually implement
     for i in range(households.shape[0]):
-        households[i, :, 3:] = solve_system.solve_household(parameters, households[i]) # TODO: REPLACE
+        households[i, :, 3:] = solve_system.solve_household(parameters, households[i])
     return households
 
 
