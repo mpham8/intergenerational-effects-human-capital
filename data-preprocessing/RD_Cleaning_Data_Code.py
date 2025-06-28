@@ -231,7 +231,11 @@ rescaling_variables = {
     'HOW_OFT_CH_W_DAD_OUTDOORS' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan],
     'DO_PARS_DISCUSS_TV' : [0, 1, np.nan], 
     # This variable below will be rescaled to months
-    'HOW_LONG_CHILD_WAS_IN_HEAD': [(0+3)/2, (3+11)/2, (12+23)/2, 24, np.nan] # NOTE: need help with rescaling
+    'HOW_LONG_CHILD_WAS_IN_HEAD': [(0+3)/2, (3+11)/2, (12+23)/2, 24, np.nan], # NOTE: need help with rescaling
+    'MOM_HELPS_CH_LEARN_NUMBERS': [1, 1, 1, 1, 1],  # these should be binary
+    'MOM_HELPS_CH_LEARN_ALPHABET': [1, 1, 1, 1, 1], 
+    'MOM_HELPS_CH_LEARN_SHAPES': [1, 1, 1, 1, 1], 
+    'MOM_HELPS_CH_LEARN_COLORS': [1, 1, 1, 1, 1], 
     
 }
 
@@ -950,11 +954,7 @@ def main():
         f.write("] \n")
     
 
-    # Seeing how many people answer the "headstart questions"
-    for column in ["CHILD_EVER_ENROLLED_IN_HEAD", "HOW_LONG_CHILD_WAS_IN_HEAD", "CHILD_AGE_WHEN_1ST_ATTD_HEA"]: 
-        count = new_data.count()[column]
-        total = new_data.count()["id"]
-        print(f"Column {column} has count {count}, being answered for {count/total}")
+    
 
 
 # End of the script
