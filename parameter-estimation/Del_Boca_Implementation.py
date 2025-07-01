@@ -22,11 +22,15 @@ import numpy as np
 import itertools
 import time
 from scipy.optimize import minimize
+from scipy.optimize import Bounds
 import solve_system
+import matplotlib.pyplot as plt
+import concurrent.futures
+import os
 
 # ---------------- CONSTANTS ------------------
 # General
-NUMBER_OF_HOUSEHOLDS = 100
+NUMBER_OF_HOUSEHOLDS = 1000
 HOUSEHOLD_VARIABLES = [
     "Parent Human Capital", 
     "Wage Rate Trajectory", 
@@ -40,7 +44,8 @@ NUM_PERIODS = 4
 NUM_MOMENTS = 24
 LATENT_FACTOR_FILEPATH = ""
 PARAM_OUTPUT_FILEPATH = "parameter_estimates_SMM.txt"
-
+METHOD_OPTIMIZATION = 'Nelder-Mead'
+NUM_PROCESSES = os.cpu_count()
 
 # Household-generation
 MU_WAGE_RATE_GROWTH = 0.07
@@ -64,20 +69,18 @@ PARAMETER_NAMES = [
 # Initial guesses for parameters
 parameters = [
     0.8,  # Delta parameter
-    0.8, # rho
-    0.9, # rho_e
-    0.6, # theta_1
-    0.35, # theta_2
-    0.25, # theta_3
-    0.15, # theta_4
-    # TODO: finish
+    0.6, # rho
+    0.7, # rho_e
+    0.4, # theta_1
+    0.2, # theta_2
+    0.1, # theta_3
 
 ]
-
-
+times_elapsed = []
 # ----------------- FUNCTIONS ---------------------
 def load_latent_factors(filepath): 
     # Random parameters, since we don't have any data
+    # TODO: replace
     means_leisure = [2, 1, 2, 3]
     stds_leisure = [0.5, 0.2, 0.5, 0.5]
     means_parental_investment = [5, 4, 3, 2]
@@ -97,8 +100,6 @@ def create_households(num_households: int) -> np.ndarray:
 
     # Parents' human capital
     parents_hc = np.random.normal(1, 0.2, (num_households, 1))
-    parents_hc[parents_hc < 0] = 0
-    print(households[:, 0].shape)
     households[:, :, 0] = parents_hc * np.ones((1, NUM_PERIODS))
     
     # Wage rate
@@ -114,21 +115,54 @@ def create_households(num_households: int) -> np.ndarray:
     government_input_stds = [0.0001, 0.004, 0.003, 0.002]
     for i in range(NUM_PERIODS): 
         households[:, i, 2] = np.random.normal(government_input_means[i], government_input_stds[i], (num_households, ))
-
-
+    
+    households[households < 0] = 0
     return households
 
 
 
 
 
-def solve_households(households: np.ndarray, parameters: list) -> np.ndarray: 
-    for i in range(households.shape[0]):
-        households[i, :, 3:] = solve_system.solve_household(parameters, households[i])
+def solve_one(args):
+    parameters, hh = args
+    # Solve for a single household
+    solved = solve_system.solve_household(parameters, hh)
+    return solved
+
+def solve_households(households: np.ndarray, parameters: list) -> np.ndarray:
+    """
+    Solves a numerical system for each household in parallel using multiple CPU cores.
+
+    Parameters
+    ----------
+    households : np.ndarray
+        A NumPy array representing the households to be solved. Each row corresponds to a household.
+    parameters : list
+        A list of parameters required for solving the system for each household.
+
+    Returns
+    -------
+    np.ndarray
+        The updated households array with the solution results assigned to the appropriate columns.
+
+    Notes
+    -----
+    This function uses `concurrent.futures.ProcessPoolExecutor` to parallelize the computation across available CPU cores.
+    Each household is processed independently in a separate process.
+    """
+
+    args_iter = ((parameters, hh) for hh in households)
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        # Map each household to a process, using chunksize for efficiency
+        results = list(executor.map(solve_one, args_iter, chunksize=20))
+
+    # Assign results back to households array
+    for i, solved in enumerate(results):
+        households[i, :, 3:] = solved
     return households
 
 
-def empirical_moments(households): 
+def moments(households): 
     moments = np.zeros(NUM_MOMENTS)
     # The columns for each respective moment
     moment_leisure = 4
@@ -150,25 +184,106 @@ def compute_weighting_matrix(moment_list: np.ndarray) -> np.ndarray:
     return np.linalg.pinv(S)
 
 def simulate_moments(param_vec: list) -> np.ndarray:
+    # Creating the households
     households = create_households(NUMBER_OF_HOUSEHOLDS)
     households = solve_households(households, param_vec)
-    return empirical_moments(households)
+    return moments(households)
 
 def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray) -> float:
+    ticker = time.perf_counter()
     simulated = simulate_moments(param_vec)
     diff = empirical - simulated
     loss = diff.T @ weighting @ diff
+    print(f"Current parameters: {param_vec}")
     print(f"Current loss: {loss}")
+    print(f"Time elapsed: {time.perf_counter() - ticker}")
+    times_elapsed.append(time.perf_counter() - ticker)
+    print(f"Average time for simulation: {np.average(times_elapsed)}")
     return loss
 
 def two_step_smm(empirical: np.ndarray, initial_guess: list):
+
+    # Constraints:
+    # 1. 0 < rho (parameter[1]) < 1
+    # 2. 0 < rho_e (parameter[2]) < 1
+    # 3. theta_1 + theta_2 + theta_3 + theta_4 = 1 (parameters[3:7]) (built-in to system solver now)
+
+    # Bounds for all parameters (None means no bound)
+    lower_bounds = [-1e10, -1e10, -1e10, 0.0001, 0.0001, 0.0001]
+    upper_bounds = [1e10, 1, 1, 1, 1, 1]
+    bounds = Bounds(lower_bounds, upper_bounds)
+
+
+
+    
+
     W1 = np.eye(len(empirical))
-    res1 = minimize(objective, initial_guess, args=(empirical, W1), method='Nelder-Mead')
-    theta_1 = res1.x
-    sims = np.array([simulate_moments(theta_1) for _ in range(100)])
-    W2 = compute_weighting_matrix(sims)
-    res2 = minimize(objective, theta_1, args=(empirical, W2), method='Nelder-Mead')
-    return res2.x, res2.fun
+    res1 = minimize(
+        objective,
+        initial_guess,
+        args=(empirical, W1),
+        method=METHOD_OPTIMIZATION,
+        bounds=bounds,
+        options={'disp': True}
+    )
+    if res1.success:
+        print("Successfully completed first step of SMM.")
+        print("Full first optimizer message: ")
+        print(res1)
+        print("\nInitial guesses for parameters:")
+        print(res1.x)
+        theta_1 = res1.x
+        sims = np.array([simulate_moments(theta_1) for _ in range(100)])
+        print("Computing more optimal weighting matrix...")
+        W2 = compute_weighting_matrix(sims)
+        print("Starting second step of SMM")
+        res2 = minimize(
+            objective,
+            theta_1,
+            args=(empirical, W2),
+            method=METHOD_OPTIMIZATION,
+            bounds=bounds,
+            options={'disp': True}
+        )
+        return res2.x, res2.fun
+    else: 
+        print("First step of SMM failed. Sadness")
+        print(res1)
+
+
+def bootstrap_confidence_intervals(empirical, initial_guess, B=10):
+    bootstrap_estimates = []
+    for _ in range(B):
+        idx = np.random.choice(NUMBER_OF_HOUSEHOLDS, NUMBER_OF_HOUSEHOLDS, replace=True)
+        households = create_households(NUMBER_OF_HOUSEHOLDS)[idx]
+        households = solve_households(households, parameters)
+        boot_empirical = moments(households)
+        est, _ = two_step_smm(boot_empirical, initial_guess)
+        bootstrap_estimates.append(est)
+    estimates = np.array(bootstrap_estimates)
+    lower = np.percentile(estimates, 2.5, axis=0)
+    upper = np.percentile(estimates, 97.5, axis=0)
+    return lower, upper
+
+
+def convergence_test(empirical):
+    household_sizes = [500, 1000, 2000, 5000, 10000]
+    estimates = []
+    global NUMBER_OF_HOUSEHOLDS
+    for size in household_sizes:
+        NUMBER_OF_HOUSEHOLDS = size
+        theta, _ = two_step_smm(empirical, parameters)
+        estimates.append(theta)
+    estimates = np.array(estimates)
+    for i, name in enumerate(PARAMETER_NAMES):
+        plt.plot(household_sizes, estimates[:, i], label=name)
+    plt.xlabel("Number of Households")
+    plt.ylabel("Estimated Parameter")
+    plt.title("Convergence of Parameter Estimates")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
 
@@ -188,7 +303,14 @@ def main():
 
 
     # Running the simulation
-    empirical = empirical_moments(households)
+    # empirical = load_latent_factors(LATENT_FACTOR_FILEPATH) # TODO: get the actual file and uncomment
+    empirical = simulate_moments(
+    [1.2,  # Delta parameter
+    0.1, # rho
+    0.1, # rho_e
+    0.3, # theta_1
+    0.4, # theta_2
+    0.2])
     param_estimates, obj_val = two_step_smm(empirical, parameters)
     print("Estimated Parameters:", param_estimates)
     print("Objective Function Value:", obj_val)

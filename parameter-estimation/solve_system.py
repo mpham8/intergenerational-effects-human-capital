@@ -36,7 +36,8 @@ def solve_bounded_system_t1(parameters, household):
     delta   = parameters[0]
     rho = parameters[1]
     rho_e = parameters[2]
-    theta1, theta2, theta3, theta4 = parameters[3:]
+    theta1, theta2, theta3 = parameters[3:]
+    theta4 = 1 - theta1 - theta2 - theta3
 
     h = household[0, 0] # zeroth period, zeroth column
     w1, w2, w3, w4 = household[:, 1]
@@ -209,9 +210,9 @@ def solve_bounded_system_t1(parameters, household):
                     best_norm = norm
                     best_sol = sol
                     
-                print(f"Relaxed bounds - Guess {guess}: norm = {norm}, solution = {sol.x}")
+                # print(f"Relaxed bounds - Guess {guess}: norm = {norm}, solution = {sol.x}")
             except Exception as e:
-                print(f"Failed with relaxed bounds and guess {guess}: {str(e)}")
+                # print(f"Failed with relaxed bounds and guess {guess}: {str(e)}")
                 continue
         
         sol = best_sol
@@ -269,7 +270,8 @@ def solve_bounded_system_t2(parameters, household, h2):
     delta   = parameters[0]
     rho = parameters[1]
     rho_e = parameters[2]
-    theta1, theta2, theta3, theta4 = parameters[3:]
+    theta1, theta2, theta3 = parameters[3:]
+    theta4 = 1 - theta1 - theta2 - theta3
 
     h = household[0, 0] # zeroth period, zeroth column
     w1, w2, w3, w4 = household[:, 1]
@@ -452,7 +454,7 @@ def solve_bounded_system_t2(parameters, household, h2):
     
     # If all solutions are at the lower bound, try a different approach
     if best_sol is not None and np.allclose(best_sol.x, bounds_lower):
-        print("\nTrying a different approach with relaxed bounds...")
+        # print("\nTrying a different approach with relaxed bounds...")
         # Try with slightly relaxed lower bounds
         relaxed_bounds_lower = [min_l - 0.05, min_l - 0.05, min_l - 0.05]
         
@@ -530,7 +532,8 @@ def solve_bounded_system_t3(parameters, household, h3):
     delta   = parameters[0]
     rho = parameters[1]
     rho_e = parameters[2]
-    theta1, theta2, theta3, theta4 = parameters[3:]
+    theta1, theta2, theta3 = parameters[3:]
+    theta4 = 1 - theta1 - theta2 - theta3
 
     # Household-level parameters
     h = household[0, 0] # zeroth period, zeroth column
@@ -787,7 +790,8 @@ def solve_bounded_system_t4(parameters, household, h4):
     delta   = parameters[0]
     rho = parameters[1]
     rho_e = parameters[2]
-    theta1, theta2, theta3, theta4 = parameters[3:]
+    theta1, theta2, theta3 = parameters[3:]
+    theta4 = 1 - theta1 - theta2 - theta3
 
     h = household[0, 0] # zeroth period, zeroth column
     w1, w2, w3, w4 = household[:, 1]
@@ -936,7 +940,7 @@ def solve_bounded_system_t4(parameters, household, h4):
         [0.65],
         [0.75],
         [0.85],
-        [0.3],
+        [0.3], # NOTE: 0.3 is always failing as a guess. Why?
         [0.8]
     ]
     for guess in initial_guesses:
@@ -959,14 +963,14 @@ def solve_bounded_system_t4(parameters, household, h4):
             # Print progress for each guess
             # print(f"Guess {guess}: norm = {norm}, solution = {sol.x}")
         except Exception as e:
-            print(f"Failed with guess {guess}: {str(e)}")
+            # print(f"Failed with guess {guess}: {str(e)}")
             continue
     
     sol = best_sol
     
     # If all solutions are at the lower bound, try a different approach
     if best_sol is not None and np.allclose(best_sol.x, bounds_lower):
-        print("\nTrying a different approach with relaxed bounds...")
+        # print("\nTrying a different approach with relaxed bounds...")
         # Try with slightly relaxed lower bounds
         relaxed_bounds_lower = [min_l - 0.05]
         
