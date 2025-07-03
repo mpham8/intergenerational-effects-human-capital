@@ -40,7 +40,9 @@ from categories_of_variables import categories_of_variables
 
 # TODO: debug weird variable_age results
 # TODO: normalize alphabet/numbers/colors variables
-
+# TODO: figure out how many data points are outside manual variable ages
+# TODO: trust the moms
+# TODO: exclude data > 2 years outside range (above) or < 1 year outside range (below)
 
 # CONSTANTS
 

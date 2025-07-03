@@ -249,6 +249,8 @@ def two_step_smm(empirical: np.ndarray, initial_guess: list):
     else: 
         print("First step of SMM failed. Sadness")
         print(res1)
+        print("We're going again")
+        two_step_smm(empirical, np.random.uniform(0, 1, len(initial_guess)))
 
 
 def bootstrap_confidence_intervals(empirical, initial_guess, B=10):
@@ -266,7 +268,7 @@ def bootstrap_confidence_intervals(empirical, initial_guess, B=10):
     return lower, upper
 
 
-def convergence_test(empirical):
+def convergence_test(empirical, parameters):
     household_sizes = [500, 1000, 2000, 5000, 10000]
     estimates = []
     global NUMBER_OF_HOUSEHOLDS
@@ -321,7 +323,11 @@ def main():
             f.write(f"{PARAMETER_NAMES[i]}: {param_estimates[i]}")
     
     toc = time.perf_counter()
-    print(f"Total time for program (in seconds): {toc - tic}")
+    print(f"Total time for two step simulation (in seconds): {toc - tic}")
+
+    bootstrap_confidence_intervals(empirical, param_estimates)
+    convergence_test(empirical, parameters)
+
 
     
 

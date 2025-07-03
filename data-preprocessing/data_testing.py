@@ -28,18 +28,17 @@ for column in ["CHILD_EVER_ENROLLED_IN_HEAD", "HOW_LONG_CHILD_WAS_IN_HEAD", "CHI
     print(f"Column {column} has count {count}, being answered for {count/total}")
 
 column_to_examine = "MOM_HELPS_CH_LEARN_NUMBERS"
-age_to_examine = 6
-column_nls = "HOME_PART_B_MOM_HELPS_CH_LEARN_NUMBERS"
+age_to_examine = 3
 keep_columns = ["id", "year", "CYRB_XRND", column_to_examine]
 age_dist = age_data.loc[(age_data[column_to_examine] > 0), "age"]
 plt.hist(age_dist, bins=np.arange(15)+0.5)
 plt.show()
 
-weird_data = age_data.loc[(age_data["age"] > age_to_examine) & (age_data[column_to_examine] > 0)]
+weird_data = age_data.loc[(age_data["age"] < age_to_examine) & (age_data[column_to_examine] > 0)]
 weird_data_ages = weird_data["age"].unique()
-weird_data2 = weird_data[["id", "year", "CYRB_XRND", "age", column_to_examine]]
+weird_data2 = weird_data[["id", "year", "CYRB_XRND", "age", column_to_examine]].sort_values("year")
 
-
+weird_data_ids = weird_data2.loc[weird_data2["year"] == 1994, "id"].values
 
 
 print(f"These are some of the weird values: \n {weird_data2}")
@@ -48,3 +47,4 @@ print(f"Here are the ages listed: {weird_data_ages}")
 
 print(f"There are a total of {weird_data2.count()} weird values")
 
+print(f"Here are the weird data IDs you requested: \n{weird_data_ids}")
