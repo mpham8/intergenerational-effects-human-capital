@@ -27,10 +27,10 @@ global global_dir = "/Users/studentbjt/Documents/Research/intergenerational-effe
 local raw_data_folder = "Raw_Data"
 // REPLACE ABOVE WITH YOUR FILEPATH
 
-local cnls_filepath = "06-26-25-child" // if downloaded data from NLS: replace with your data name
+local cnls_filepath = "07-08-25-child" // if downloaded data from NLS: replace with your data name
 local nls79_filepath = "06-24-mother-data"
 local rename_variable_labels_filepath = "Initial_Preprocessing/Rename_Names_To_Labels.do" // ALSO REPLACE
-local cnls_save_filepath = "06-26-25-renamed.csv"
+local cnls_save_filepath = "07-08-25-renamed.csv"
 local nls79_save_filepath = "06-24-25-mother-renamed.csv"
 
 

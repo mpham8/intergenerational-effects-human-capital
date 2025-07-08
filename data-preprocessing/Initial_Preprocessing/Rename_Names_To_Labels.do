@@ -156,7 +156,7 @@ foreach var of local all_vars {
 	* Check if new name already exists. If so, it's a specific exception
 	capture confirm variable `newname'
 	if !_rc {
-		if substr("`lab'", 1, 4) == "HOME" {
+		if substr("`lab'", 1, 4) == "HOME" { // mom helps ch learn
 			local clean_label = substr("`lab'", 15, .)
 		}
 		else if substr("`lab'", 1, 5) == "TOTAL" {
@@ -164,6 +164,9 @@ foreach var of local all_vars {
 		}
 		else if substr("`lab'", 1, 4) == "TYPE" {
 			local clean_label = substr("`lab'", 9, .)
+		}
+		else if substr("`lab'", 1, 2) == "RC" { // recode - mom helps ch learn
+			local clean_label = substr("`lab'", 11, .)
 		}
 		
 		local clean_label = usubinstr("`clean_label'", " ", "_", .)

@@ -49,22 +49,21 @@ from important_dictionary_variables import categories_of_variables, variable_age
 # File paths
 
 # Input files 
-nls_file_path = 'data-preprocessing/Initial_Preprocessing/06-26-25-renamed.csv'  # Update this path as needed
+nls_file_path = 'data-preprocessing/Initial_Preprocessing/07-08-25-renamed.csv'  # Update this path as needed
 mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-24-25-mother-renamed.csv'  # File containing mother data, update this path as needed
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
-nan_file_path = 'data-preprocessing/Initial_Preprocessing/nan_columns_testing.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_age_panel_testing.csv'
-period_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_testing.csv'  # File to save the child by period data
-
+nan_file_path = 'data-preprocessing/Initial_Preprocessing/nan_columns_BEST.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_age_panel_BEST.csv'
+period_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_BEST.csv'  # File to save the child by period data
+period_wide_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_wide_BEST.csv'  # File to save the wide format of the child by period data
 
 
 # Defining terms for processing
-SHORTEN_DATA = True
-WIDE = True # whether to output wide or long format
+SHORTEN_DATA = False
 NUMBER_OF_ROWS_TESTING = 500
-PREBIRTH_AGES_PER_CHILD = 5 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
+PREBIRTH_AGES_PER_CHILD = 2 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
 
 
 # Defining terms for rescaling data
@@ -104,6 +103,7 @@ columns_to_drop = {
 
 # List of prefixes for columns that should be removed when naming columns
 column_prefixes_to_remove = [
+    'RC_HOME_B_',
     'HOME_A_0_2_', 
     'HOME_B_3_5_',
     'HOME_C_6_9_',
@@ -125,6 +125,7 @@ column_prefixes_to_remove = [
 poorly_named_columns = {
     'MOM_HELPS_CH_LE': 'MOM_HELPS_CH_LEARN_NUMBERS',
     'MOM_HELPS_CH_LEA': 'MOM_HELPS_CH_LEARN_NUMBERS',
+    'MOM_HELPS_CH_LEAR' : 'MOM_HELPS_CH_LEARN_NUMBERS',
     'MOM_HELPS_CH_LEARN_N': 'MOM_HELPS_CH_LEARN_NUMBERS',
     'MOM_HELPS_CH_LEARN_A': 'MOM_HELPS_CH_LEARN_ALPHABET',
     'MOM_HELPS_CH_LEARN_ALPHABE' : 'MOM_HELPS_CH_LEARN_ALPHABET',
@@ -164,6 +165,8 @@ poorly_named_columns = {
     'HOW_OFT_TAKEN_TO_P' : 'HOW_OFT_TAKEN',
     'HOW_OFT_TAKEN_TO' : 'HOW_OFT_TAKEN',
     'HOW_OFT_TAKEN_T' : 'HOW_OFT_TAKEN',
+    'HOW_OFT_CH_TAKN_TO_P' : 'HOW_OFT_TAKEN', 
+    'HOW_OFT_CH_TAKE_TO_P' : 'HOW_OFT_TAKEN',
     'MUSIC_INSTMT_CH_CA' : 'MUSIC_INSTMT_CH',
     'MUSIC_INSTMT_C' : 'MUSIC_INSTMT_CH',
     'IS_THERE_MUSIC_INSTR' : 'MUSIC_INSTMT_CH',
@@ -964,9 +967,6 @@ def main():
     period_data_stats.to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv", mode='w')
     print("Summary of period data saved")
 
-    # Creating the wide format of the period data
-    if WIDE:
-        period_data = transform_period_data(period_data)
 
 
     # Print the first few rows of the period data to verify
@@ -978,7 +978,9 @@ def main():
     print("\nColumns in the period data:")
     print(period_data.columns.tolist())
 
-
+    # Describe the period data
+    print("\nDescribing the period data")
+    print(period_data.describe())
     # 3a. Running Checks
 
 
@@ -1003,20 +1005,20 @@ def main():
     # Checking for "bad" columns
 
     # Count the number of full rows gained from dropping each column
-    gain_from_column_drop = {}
-    initial_full_rows = period_data.copy().dropna(inplace=False).shape[0]
-    print(f"Initial full rows: {initial_full_rows}")
-    # Exclude 'id' and 'period' columns from the loop
-    columns_to_check = [col for col in period_data.columns if col not in ['id', 'period']]
-    for col in columns_to_check:
-        dropped = period_data.copy().drop(columns=[col])
-        full_rows = dropped.dropna().shape[0]
-        gain_from_column_drop[col] = full_rows - initial_full_rows
-    print("Rows gained from dropping each column (full rows only):")
-    results = []
-    for col, gain in gain_from_column_drop.items():
-        results.append(f"{col}: {gain}")
-    print("\n".join(results))
+    # gain_from_column_drop = {}
+    # initial_full_rows = period_data.copy().dropna(inplace=False).shape[0]
+    # print(f"Initial full rows: {initial_full_rows}")
+    # # Exclude 'id' and 'period' columns from the loop
+    # columns_to_check = [col for col in period_data.columns if col not in ['id', 'period']]
+    # for col in columns_to_check:
+    #     dropped = period_data.copy().drop(columns=[col])
+    #     full_rows = dropped.dropna().shape[0]
+    #     gain_from_column_drop[col] = full_rows - initial_full_rows
+    # print("Rows gained from dropping each column (full rows only):")
+    # results = []
+    # for col, gain in gain_from_column_drop.items():
+    #     results.append(f"{col}: {gain}")
+    # print("\n".join(results))
     
 
     
@@ -1029,6 +1031,10 @@ def main():
     print(f"Period data saved to {period_output_file_path}")
 
     
+    period_data_wide = transform_period_data(period_data)
+    period_data_wide.to_csv(period_wide_output_file_path, index=False)
+    print(f"Wide period data saved to {period_wide_output_file_path}")
+
 
     # Save constants to a separate file
     with open(f"{period_output_file_path[:-4]}_CONSTANTS.txt", "w") as f:
