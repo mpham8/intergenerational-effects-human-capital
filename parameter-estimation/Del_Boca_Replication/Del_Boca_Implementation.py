@@ -225,7 +225,8 @@ def two_step_smm(empirical: np.ndarray, initial_guess: list):
         args=(empirical, W1),
         method=METHOD_OPTIMIZATION,
         bounds=bounds,
-        options={'disp': True}
+        options={'disp': True}, 
+        tol=0.01
     )
     if res1.success:
         print("Successfully completed first step of SMM.")
@@ -304,7 +305,8 @@ def main():
     for i in range(households.shape[2]): 
         print(f"Here are the averages for {HOUSEHOLD_VARIABLES[i]} across periods: \n{mean_characteristics[:, i]}")
 
-
+    # Printing the number of CPUs I'm using in the analysis
+    print(f"Number of CPUs used: {NUM_PROCESSES}")
     # Running the simulation
     # empirical = load_latent_factors(LATENT_FACTOR_FILEPATH) # TODO: get the actual file and uncomment
     empirical = simulate_moments(
