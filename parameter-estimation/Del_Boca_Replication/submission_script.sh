@@ -1,14 +1,20 @@
 #!/bin/bash
-#SBATCH --partition=oconnell-lab        # Partition (job queue)
+#SBATCH --partition=compute        # Partition (job queue)
 #SBATCH --requeue                  # Return job to the queue if preempted
 #SBATCH --job-name=del-boca        # Assign a short name to your job
 #SBATCH --nodes=1                  # Number of nodes you require
-#SBATCH --cpus-per-task=1          # Cores per task (>1 if multithread tasks)
+#SBATCH --cpus-per-task=16          # Cores per task (>1 if multithread tasks)
 #SBATCH --mem-per-cpu=16gb         # Real memory per cpu
 #SBATCH --time=00-24:00:00         # Total run time limit (DD-HH:MM:SS)
 #SBATCH --output=slurm.del-boca.%N.%j.out   # STDOUT file for SLURM output
 #SBATCH --mail-type=ALL            # Email if anything happens (job start, end, failure, requeue, etc.)
 #SBATCH --mail-user=btaheri1@swarthmore.edu
+
+
+## Modifying the executable nature of the files, so that I don't have to change them every time
+chmod +x "Del_Boca_Implementation.py"
+chmod +x "solve_system.py"
+
 
 ## Set the value of BIGSCRATCH to 'true' if your job is
 ## anticipated to require more than a few hundred gigabytes
@@ -17,6 +23,7 @@
 ## will use scratch space on the parallel storage node.
 ## This is slower than local scratch space on the compute
 ## nodes but has significantly more space.
+
 BIGSCRATCH=false
 
 SCRATCHDIR='scratch'

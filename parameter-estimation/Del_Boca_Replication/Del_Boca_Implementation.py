@@ -10,9 +10,19 @@ The code completes the following steps:
 2. Import the latent factor estimates for the 
 3. Use the equation for the simulated method of moments to find the moment estimator
 
+8-12 processors
+If already in queue: do below command to figure out how long it's going to take
+squeue --start -j <jobid>
 
 
+To test bash script (time): 
+sbatch --test-only myscript.sh
 
+
+salloc -t 60 --cpus-per-task=1 --mem-per-cpu=32gb --partition=unowned
+
+
+Don't use base environment, create 
 Questions: 
 - 
 - 
@@ -45,7 +55,7 @@ HOUSEHOLD_VARIABLES = [
 ]
 NUM_PERIODS = 4
 NUM_MOMENTS = 24
-LATENT_FACTOR_FILEPATH = ""
+LATENT_FACTOR_FILEPATH = os.path.dirname(os.path.abspath(__file__)) + "/Attanasio Replication/6-26_estimation_results.xlsx"
 PARAM_OUTPUT_FILEPATH = "parameter_estimates_SMM.txt"
 METHOD_OPTIMIZATION = 'Nelder-Mead'
 
@@ -54,31 +64,48 @@ MU_WAGE_RATE_GROWTH = 0.07
 ETA_STD_WAGE_RATE_GROWTH = 0.02
 
 # --------------- PARAMETERS ---------------
-
+num_workers = 0  # Number of CPU cores to use, set to None to use all available cores
 
 # Actual parameters to estimate 
 
 # List of parameters
 PARAMETER_NAMES = [
     "Delta", 
+    "Rho_val", 
+    "Rho_e_val", 
     "theta_1", 
     "theta_2", 
     "theta_3", 
     "theta_4", 
-    "Rho_val", 
-    "Rho_e_val", 
 ]
-# Initial guesses for parameters
+# Step sizes for grid search
+STEP_SIZES = {
+    "Delta": 10, 
+    "Rho_val": 1, 
+    "Rho_e_val": 1, 
+    "theta_1" : 0.2, 
+    "theta_2" : 0.2, 
+    "theta_3" : 0.2, 
+
+}
+# Initial guesses for parameters (NOT APPLICABLE IN CURRENT CODE)
 parameters = [
-    0.8,  # Delta parameter
-    0.6, # rho
-    0.7, # rho_e
+    10,  # Delta parameter
+    -0.5, # rho
+    -0.5, # rho_e
     0.4, # theta_1
     0.2, # theta_2
-    0.1, # theta_3
-
+    0.2, # theta_3
+# TODO: check if this is wrong (shouldn't I have different thetas over time?)
 ]
+# Ranges for parameters
+# rho (and rho_e): -5 to 0.5
+# thetas: 0 to 1
+# delta parameter: 0 to 100
+
 times_elapsed = []
+
+
 # ----------------- FUNCTIONS ---------------------
 def load_latent_factors(filepath): 
     # Random parameters, since we don't have any data
@@ -131,7 +158,7 @@ def solve_one(args):
     solved = solve_system.solve_household(parameters, hh)
     return solved
 
-def solve_households(households: np.ndarray, parameters: list) -> np.ndarray:
+def solve_households(households: np.ndarray, parameters: list, num_workers=0) -> np.ndarray:
     """
     Solves a numerical system for each household in parallel using multiple CPU cores.
 
@@ -141,24 +168,21 @@ def solve_households(households: np.ndarray, parameters: list) -> np.ndarray:
         A NumPy array representing the households to be solved. Each row corresponds to a household.
     parameters : list
         A list of parameters required for solving the system for each household.
+    num_workers : int, optional
+        Number of CPU cores to use. If None, uses all available cores.
 
     Returns
     -------
     np.ndarray
         The updated households array with the solution results assigned to the appropriate columns.
-
-    Notes
-    -----
-    This function uses `concurrent.futures.ProcessPoolExecutor` to parallelize the computation across available CPU cores.
-    Each household is processed independently in a separate process.
     """
+    if num_workers <= 0:
+        num_workers = os.cpu_count()
 
     args_iter = ((parameters, hh) for hh in households)
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        # Map each household to a process, using chunksize for efficiency
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         results = list(executor.map(solve_one, args_iter, chunksize=20))
 
-    # Assign results back to households array
     for i, solved in enumerate(results):
         households[i, :, 3:] = solved
     return households
@@ -185,15 +209,17 @@ def compute_weighting_matrix(moment_list: np.ndarray) -> np.ndarray:
     S = np.cov(moment_list.T)
     return np.linalg.pinv(S)
 
-def simulate_moments(param_vec: list) -> np.ndarray:
+def simulate_moments(param_vec: list, num_workers=0) -> np.ndarray:
     # Creating the households
+    # TODO: only create the households once, so that the only thing changing over time is the parameters
     households = create_households(NUMBER_OF_HOUSEHOLDS)
-    households = solve_households(households, param_vec)
+    households = solve_households(households, param_vec, num_workers)
     return moments(households)
 
-def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray) -> float:
+def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray, num_workers=0) -> float:# 
     ticker = time.perf_counter()
-    simulated = simulate_moments(param_vec)
+    simulated = simulate_moments(param_vec, num_workers)
+    # TODO: make the error the percent difference from simulated, not absolute difference (to ensure weighting isn't affected by units)
     diff = empirical - simulated
     loss = diff.T @ weighting @ diff
     print(f"Current parameters: {param_vec}")
@@ -203,7 +229,7 @@ def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray) -> 
     print(f"Average time for simulation: {np.average(times_elapsed)}")
     return loss
 
-def two_step_smm(empirical: np.ndarray, initial_guess: list):
+def two_step_smm(empirical: np.ndarray, initial_guess: list, num_workers=0):
 
     # Constraints:
     # 1. 0 < rho (parameter[1]) < 1
@@ -223,7 +249,7 @@ def two_step_smm(empirical: np.ndarray, initial_guess: list):
     res1 = minimize(
         objective,
         initial_guess,
-        args=(empirical, W1),
+        args=(empirical, W1, num_workers),
         method=METHOD_OPTIMIZATION,
         bounds=bounds,
         options={'disp': True}, 
@@ -236,17 +262,18 @@ def two_step_smm(empirical: np.ndarray, initial_guess: list):
         print("\nInitial guesses for parameters:")
         print(res1.x)
         theta_1 = res1.x
-        sims = np.array([simulate_moments(theta_1) for _ in range(100)])
+        sims = np.array([simulate_moments(theta_1) for _ in range(10)])
         print("Computing more optimal weighting matrix...")
         W2 = compute_weighting_matrix(sims)
         print("Starting second step of SMM")
         res2 = minimize(
             objective,
             theta_1,
-            args=(empirical, W2),
+            args=(empirical, W2, num_workers),
             method=METHOD_OPTIMIZATION,
             bounds=bounds,
-            options={'disp': True}
+            options={'disp': True},
+            tol=0.001
         )
         return res2.x, res2.fun
     else: 
@@ -290,7 +317,55 @@ def convergence_test(empirical, parameters):
     plt.tight_layout()
     plt.show()
 
+def grid_search_smm(empirical, step_sizes=None):
+    """
+    Performs a grid search over initial guesses for parameters and finds the global minimum.
+    step_sizes: dict with keys matching PARAMETER_NAMES and values as step sizes.
+    Returns best_params, best_obj_val
+    """
+    # Default step sizes if not provided
+    if step_sizes is None:
+        step_sizes = {
+            "Delta": 10,
+            "Rho_val": 1,
+            "Rho_e_val": 1,
+            "theta_1": 0.2,
+            "theta_2": 0.2,
+            "theta_3": 0.2,
+        }
+    delta_range = np.arange(0, 100+step_sizes["Delta"], step_sizes["Delta"])
+    rho_range = np.arange(-5, 0.5+step_sizes["Rho_val"], step_sizes["Rho_val"])
+    rho_e_range = np.arange(-5, 0.5+step_sizes["Rho_e_val"], step_sizes["Rho_e_val"])
+    theta_1_range = np.arange(0, 1+step_sizes["theta_1"], step_sizes["theta_1"])
+    theta_2_range = np.arange(0, 1+step_sizes["theta_2"], step_sizes["theta_2"])
+    theta_3_range = np.arange(0, 1+step_sizes["theta_3"], step_sizes["theta_3"])
 
+    # theta_4 is determined by 1 - (theta_1 + theta_2 + theta_3)
+    best_obj_val = np.inf
+    best_params = None
+
+    for theta_1 in theta_1_range:
+        for theta_2 in theta_2_range:
+            for theta_3 in theta_3_range:
+                theta_4 = 1 - (theta_1 + theta_2 + theta_3)
+                if not 0 <= theta_4 <= 1:
+                    continue
+                for delta in delta_range:
+                    for rho in rho_range:
+                        for rho_e in rho_e_range:
+                            initial_guess = [delta, rho, rho_e, theta_1, theta_2, theta_3]
+                            try:
+                                params, obj_val = two_step_smm(empirical, initial_guess)
+                                if obj_val < best_obj_val:
+                                    best_obj_val = obj_val
+                                    best_params = params
+                            except Exception as e:
+                                print(f"Grid search failed for {initial_guess}: {e}")
+    return best_params, best_obj_val
+
+
+
+# ------- HELPER FUNCTIONS --------------
 
 # COPIED FROM INTERNET
 def available_cpu_count():
@@ -397,6 +472,29 @@ def available_cpu_count():
 
     return 0
 
+# A function to compute the condition number of the Jacobian of the moment conditions.
+# This is useful for diagnosing potential issues with the parameter estimation process.
+def condition_number(param_vec: list, epsilon=1e-5) -> float:
+    """Compute condition number of the Jacobian of moment conditions."""
+    base_moments = simulate_moments(param_vec)
+    k = len(param_vec)
+    n = len(base_moments)
+    J = np.zeros((n, k))
+    
+    for j in range(k):
+        perturbed = param_vec.copy()
+        perturbed[j] += epsilon
+        diff = simulate_moments(perturbed) - base_moments
+        J[:, j] = diff / epsilon
+    
+    cond = np.linalg.cond(J)
+    print(f"Condition number of Jacobian: {cond:.2e}")
+    return cond
+
+
+
+
+# ------------------ MAIN FUNCTION ------------------
 def main(): 
     tic = time.perf_counter()
     NUM_PROCESSES = available_cpu_count()
@@ -404,7 +502,7 @@ def main():
     # Creating the households
     households = create_households(NUMBER_OF_HOUSEHOLDS)
     # Testing that they were created properly
-    for i in range(2): 
+    for i in range(5): 
         print(f"Household {i}: {households[i]}")
     
     # Gathering mean characteristics
@@ -413,20 +511,39 @@ def main():
     for i in range(households.shape[2]): 
         print(f"Here are the averages for {HOUSEHOLD_VARIABLES[i]} across periods: \n{mean_characteristics[:, i]}")
 
-    # Printing the number of CPUs I'm using in the analysis
-    print(f"Number of CPUs used: {NUM_PROCESSES}")
-    # Running the simulation
-    # empirical = load_latent_factors(LATENT_FACTOR_FILEPATH) # TODO: get the actual file and uncomment
-    empirical = simulate_moments(
-    [1.2,  # Delta parameter
-    0.1, # rho
-    0.1, # rho_e
-    0.3, # theta_1
-    0.4, # theta_2
-    0.2])
-    param_estimates, obj_val = two_step_smm(empirical, parameters)
-    print("Estimated Parameters:", param_estimates)
-    print("Objective Function Value:", obj_val)
+    # Calculating the condition number of the Jacobian of the moment conditions
+    # condition_number(parameters)
+    # Temporarily doing a performance test to see how long it takes to solve the households depending on the number of processes
+    performance_times = []
+    parameters_to_optimize = [12, -0.2,-0.2,0.35, 0.15, 0.25]
+    empirical = np.average([simulate_moments(parameters_to_optimize) for _ in range(10)], axis=0) # Placeholder
+    for i in range(1, NUM_PROCESSES): 
+        
+        # Printing the number of CPUs I'm using in the analysis
+        print(f"Number of CPUs used: {i}")
+        num_workers = i
+        # Running the simulation
+
+        # If 
+        # empirical = load_latent_factors(LATENT_FACTOR_FILEPATH) # TODO: get the actual file and uncomment
+        
+        param_estimates, obj_val = two_step_smm(empirical, parameters, num_workers=num_workers)
+        print("Estimated Parameters:", param_estimates)
+        print("Objective Function Value:", obj_val)
+
+        toc = time.perf_counter()
+        print(f"Total time for two step simulation (in seconds): {toc - tic}")
+        performance_times.append(toc - tic)
+    
+    print("Performance times for different numbers of processes:")
+    for i, time_taken in enumerate(performance_times, start=1):
+        print(f"Processes: {i}, Time taken: {time_taken:.2f} seconds")
+    
+    plt.plot(range(1, NUM_PROCESSES), performance_times, marker='o')
+    plt.xlabel("Number of Processes")
+    plt.ylabel("Time Taken (seconds)")
+    plt.title("Performance of Two-Step SMM with Varying Processes")
+    plt.savefig("Performance_Test_Two_Step_SMM")
 
     with open(PARAM_OUTPUT_FILEPATH, "w") as f:
         f.write("Parameter estimates from Simulated Method of Moments")
@@ -436,8 +553,8 @@ def main():
     toc = time.perf_counter()
     print(f"Total time for two step simulation (in seconds): {toc - tic}")
 
-    bootstrap_confidence_intervals(empirical, param_estimates)
-    convergence_test(empirical, parameters)
+    # bootstrap_confidence_intervals(empirical, param_estimates)
+    # convergence_test(empirical, parameters)
 
 
     

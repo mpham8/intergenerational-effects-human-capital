@@ -36,28 +36,40 @@ Note: make sure the "categories_of_variables" file is hosted within the same dir
 import pandas as pd
 import numpy as np
 import os
-from important_dictionary_variables import categories_of_variables, variable_ages
+from important_dictionary_variables import categories_of_variables, variable_ages, variable_descriptions
 
 
-# TODO: normalize alphabet/numbers/colors variables
+
 # TODO: figure out how many data points are outside manual variable ages
 # TODO: trust the moms
 # TODO: exclude data > 2 years outside range (above) or < 1 year outside range (below)
 
+# Notes: 
+# 1. For ages 3-5, shift down. Everything else, interpolate then remove (TODO)
+
+# TODO: change XRND (and similarly aggregated) columns to only have one column
+
+
 # CONSTANTS
+
+# TODO: fix XRND variables
+
+# TODO: add all variables that appear in Attanasio and Del Boca as controls
 
 # File paths
 
+# File path ending (it's the same across all output paths)
+PATH_ENDING = "BEST"
 # Input files 
 nls_file_path = 'data-preprocessing/Initial_Preprocessing/07-08-25-renamed.csv'  # Update this path as needed
 mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-24-25-mother-renamed.csv'  # File containing mother data, update this path as needed
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
-nan_file_path = 'data-preprocessing/Initial_Preprocessing/nan_columns_BEST.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_age_panel_BEST.csv'
-period_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_BEST.csv'  # File to save the child by period data
-period_wide_output_file_path = 'data-preprocessing/Initial_Preprocessing/child_period_panel_wide_BEST.csv'  # File to save the wide format of the child by period data
+nan_file_path = f'data-preprocessing/Processed_Data/nan_columns_{PATH_ENDING}.csv'  # File to save columns with NaN values for further investigation
+age_output_file_path = f'data-preprocessing/Processed_Data/child_age_panel_{PATH_ENDING}.csv'
+period_output_file_path = f'data-preprocessing/Processed_Data/child_period_panel_{PATH_ENDING}.csv'  # File to save the child by period data
+period_wide_output_file_path = f'data-preprocessing/Processed_Data/child_period_panel_wide_{PATH_ENDING}.csv'  # File to save the wide format of the child by period data
 
 
 # Defining terms for processing
@@ -92,7 +104,7 @@ columns_to_drop = {
     "VERSION_R29_XRND", 
     "TYPE_OF_SCHOOL_RECODE", 
     "MOM_HELPS_CH_W_NONE", 
-    "MOM_RACE_ID", 
+    "MOM_SAMPLE_ID", 
     "MOM_SEX", 
     "DOES_CHILD_NEVER_USE", 
     'TOTAL_FAMILY_INCOME_FR_ALL', 
@@ -209,11 +221,11 @@ better_named_columns = {
     'HOW_OFT_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_PERFORMANCE',
     'HOW_OFT_CH_SPEND' : 'HOW_OFT_CH_SPEND_TIME_W_DAD',
     'HOW_OFT_CH_W_DAD' : 'HOW_OFT_CH_W_DAD_OUTDOORS',
-    'SAMPLE_RACE_78SCRN' : 'MOM_RACE_ENCODED',
+    'SAMPLE_RACE_78SCRN' : 'MOM_RACE',
     'SCHOOL_CHILD_ATTENDS_RECD' : 'TYPE_OF_SCHOOL_RECODE', 
     'Q2_15A' : 'SPOUSE_WKSWK_PCY', 
     'Q2_15B' : 'SPOUSE_HRSWK_PCY',
-    'SAMPLE_ID' : 'MOM_RACE_ID', 
+    'SAMPLE_ID' : 'MOM_SAMPLE_ID', 
     'SAMPLE_SEX' : 'MOM_SEX', # could be a good check
     'HGCREV' : 'HGC_REV_MOM', 
     'IS_SCHOOL_GIFTED_HANDICAPPE' : 'IS_SCHOOL_GIFTED_HANDICAPPED',
@@ -224,6 +236,8 @@ better_named_columns = {
     'PPVT_TOTAL_RAW_SCORE' : 'PPVT', 
     'HIGHEST_GRADE_OF_REGULAR_SC' : 'HGC_YEARLY_CHILD', # NOTE: does this column need to be processed differently? It's the only column in "Educational Attainment" that's not XRND (i.e., across the whole file)
     'Q13_5' : 'LABOR_INCOME', 
+    'HGC_EVER_XRND' : 'HGC_EVER_MOM_XRND', 
+    'HIGHEST_DEGREE_EVER_XRND' : 'HIGHEST_DEGREE_EVER_MOM_XRND',
 }
 
 # If over time, all variables will be rescaled to per week (easiest to do)
@@ -235,12 +249,17 @@ rescaling_variables = {
     'HOW_OFT_CH_W_DAD' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan], 
     'HOW_OFT_CH_W_DAD_OUTDOORS' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan],
     'DO_PARS_DISCUSS_TV' : [0, 1, np.nan], 
+    'PARS_HELP_W_HOMEWORK' : [0.5/WEEKS_PER_MONTH, 1.5/WEEKS_PER_MONTH, 1.5, 5, 7, np.nan], 
     # This variable below will be rescaled to months
     'HOW_LONG_CHILD_WAS_IN_HEAD': [(0+3)/2, (3+11)/2, (12+23)/2, 24, np.nan], # NOTE: need help with rescaling
-    'MOM_HELPS_CH_LEARN_NUMBERS': [1, 1, 1, 1, 1],  # these should be binary
+
+    # The variables below should be binary
+    'MOM_HELPS_CH_LEARN_NUMBERS': [1, 1, 1, 1, 1], 
     'MOM_HELPS_CH_LEARN_ALPHABET': [1, 1, 1, 1, 1], 
     'MOM_HELPS_CH_LEARN_SHAPES': [1, 1, 1, 1, 1], 
     'MOM_HELPS_CH_LEARN_COLORS': [1, 1, 1, 1, 1], 
+    'MOM_HELPS_CH_W_NONE': [1, 1, 1, 1, 1],
+    'DO_PARS_DISCUSS_TV': [1, np.nan, np.nan, np.nan, np.nan, np.nan],
     
 }
 
@@ -377,7 +396,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 new_data.drop(columns=['year_new'], inplace=True)
 
         
-        
+        # TODO: check variables for interpolation (only interpolate with min_age and max_age + 1)
         
         
         
@@ -399,7 +418,6 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     Creates a child-by-period table from a child-by-age panel.
     For variables in categories_of_variables["Child_Human_Capital"], aggregates using the value at the END of each period.
     For all other variables, aggregates using the mean over the period.
-    For period -1, uses value at age=0 for Child_Human_Capital variables.
 
     Parameters:
         df (pd.DataFrame): The input DataFrame containing child-by-age data.
@@ -427,7 +445,7 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
         bin_edges.append(v[0])
         bin_edges.append(v[1] + 1)
     bin_edges = sorted(set(bin_edges))
-    min_age = int(df['age'].min())
+    min_age = 0
     max_age = int(df['age'].max()) + 1
     if bin_edges[0] > min_age:
         bin_edges = [min_age] + bin_edges
@@ -456,9 +474,7 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
         # For Child_Human_Capital variables: take value at period end age
         for col in value_cols:
             if col in chc_vars:
-                # For period -1, use age=0; for others, use period_end_age
-                target_age = 0 if period == -1 else period_end_age
-                val = group.loc[group['age'] == target_age, col]
+                val = group.loc[group['age'] == period_end_age, col]
                 if not val.empty:
                     row[col] = val.iloc[0]
                 else:
@@ -482,13 +498,7 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
         for child_id, group in pre_birth.groupby('id'):
             row = {'id': child_id, 'period': -1}
             for col in value_cols:
-                if col in chc_vars:
-                    # Use value at age=0 from df (not pre_birth)
-                    val = df[(df['id'] == child_id) & (df['age'] == 0)][col]
-                    row[col] = val.iloc[0] if not val.empty else np.nan
-                else:
-                    # Use value from pre_birth row
-                    row[col] = group[col].iloc[0]
+                row[col] = group[col].iloc[0]
             pre_birth_rows.append(row)
         pre_birth_df = pd.DataFrame(pre_birth_rows)
         period_data = pd.concat([pre_birth_df, period_data], ignore_index=True)
@@ -497,45 +507,89 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     return period_data
 
 
-def transform_period_data(df: pd.DataFrame) -> pd.DataFrame:
+def transform_period_data(age_panel: pd.DataFrame, period_panel: pd.DataFrame) -> pd.DataFrame:
     """ 
-    This function transforms the period data from a long format to a wide format. 
-    It creates a new df where each column corresponds to a variable for a specific period, 
-    with periods outside the variable ages excluded.
+    Transforms the period data from long to wide format using both the child-age panel and the child-period panel.
+    - For Government_Inputs: one column, latest value (largest age) from age_panel
+    - For Educational_Attainment: one column, latest value (largest age) from age_panel
+    - For Parent_Characteristics: one column, earliest value (smallest age) from age_panel
+    - All other variables: wide format, one column per period (within variable's age range) from period_panel
     """
-    # Expects columns: ['id', 'period', ...variables...]
-
     id_col = 'id'
     period_col = 'period'
-    value_cols = [col for col in df.columns if col not in [id_col, period_col]]
+    value_cols = [col for col in period_panel.columns if col not in [id_col, period_col]]
 
-    # Prepare list of (variable, period) pairs to keep
+    gov_inputs = set(categories_of_variables.get("Government_Inputs", []))
+    edu_attain = set(categories_of_variables.get("Educational_Attainment", []))
+    parent_chars = set(categories_of_variables.get("Parent_Characteristics", []))
+    other_vars = set(categories_of_variables.get("Other", []))
+
+    # Creating copies (in case this is messing up the period data somehow?)
+    age_panel = age_panel.copy()
+    period_panel = period_panel.copy()
+
+    # 1. Special columns (single column per variable) from age_panel
+    result = age_panel[[id_col]].drop_duplicates().reset_index(drop=True)
+
+    # Government_Inputs: latest value (largest age)
+    for col in gov_inputs.intersection(age_panel.columns):
+        temp = age_panel[[id_col, 'age', col]].copy()
+        temp = temp.loc[temp[col].notna()]
+        idx = temp.groupby(id_col)['age'].idxmax()
+        result[col] = temp.loc[idx].set_index(id_col)[col].reindex(result[id_col]).values
+
+    # Educational_Attainment: latest value (largest age)
+    for col in edu_attain.intersection(age_panel.columns):
+        temp = age_panel[[id_col, 'age', col]].copy()
+        temp = temp.loc[temp[col].notna()]
+        idx = temp.groupby(id_col)['age'].idxmax()
+        result[col] = temp.loc[idx].set_index(id_col)[col].reindex(result[id_col]).values
+
+    # Parent_Characteristics: earliest value (smallest age)
+    for col in parent_chars.intersection(age_panel.columns):
+        temp = age_panel[[id_col, 'age', col]].copy()
+        temp = temp.loc[temp[col].notna()]
+        idx = temp.groupby(id_col)['age'].idxmin()
+        result[col] = temp.loc[idx].set_index(id_col)[col].reindex(result[id_col]).values
+    
+    # Other: any value (should be the same for all ages)
+    for col in other_vars.intersection(age_panel.columns):
+        if col == id_col:
+            continue
+        temp = age_panel[[id_col, col]].copy()
+        temp = temp.loc[temp[col].notna()]
+        # Just take the first non-null value for each id
+        result[col] = temp.groupby(id_col)[col].first().reindex(result[id_col]).values
+
+    # 2. All other variables: wide format, one column per period (within variable's age range) from period_panel
     keep_pairs = []
     for col in value_cols:
+        if col in gov_inputs or col in edu_attain or col in parent_chars or col in other_vars:
+            continue
         min_age, max_age = variable_ages.get(col, (None, None))
         if min_age is None or max_age is None:
             continue
-        # Determine valid periods for this variable
-        for period in sorted(df[period_col].unique()):
-            # Get the age range for this period
+        for period in sorted(period_panel[period_col].unique()):
             period_info = age_periods.get(int(period))
             if period_info is None:
                 continue
             period_start, period_end = period_info
-            # If the period overlaps with the variable's age range, keep it
             if (period_end >= min_age) and (period_start <= max_age):
                 keep_pairs.append((col, period))
 
     # Pivot to wide format, keeping only valid (variable, period) pairs
-    wide_df = df.pivot(index=id_col, columns=period_col)
-    # Flatten MultiIndex columns and filter
+    wide_df = period_panel.pivot(index=id_col, columns=period_col)
     wide_df.columns = [f"{col}_P{int(period)}" for col, period in wide_df.columns]
     wide_df = wide_df.reset_index()
 
     # Filter columns to only those in keep_pairs
     valid_colnames = [f"{col}_P{int(period)}" for col, period in keep_pairs]
     result_cols = [id_col] + [c for c in wide_df.columns if c in valid_colnames]
-    return wide_df[result_cols]
+    wide_part = wide_df[result_cols]
+
+    # Merge special columns and wide columns
+    final = result.merge(wide_part, on=id_col, how='left')
+    return final
 
 def get_CPI_values(CPI_file_path: str) -> np.ndarray:
     CPI_data = pd.read_excel(CPI_file_path, header=3)
@@ -553,6 +607,7 @@ def get_age_range(df: pd.DataFrame, column: str) -> tuple:
         return (None, None)
     return (valid_ages.min(), valid_ages.max())
 
+
 # --------------------------------- MAIN SCRIPT -----------------------------------------
 # =======================================================================================
 # =======================================================================================
@@ -567,7 +622,7 @@ def main():
 
     query = input("Would you like to delete any existing output files? (yes/no): ").strip().lower()
     # List of output files to delete
-    output_files = [nan_file_path, age_output_file_path, period_output_file_path]
+    output_files = [nan_file_path, age_output_file_path, period_output_file_path, period_wide_output_file_path]
     if query == 'yes':
         # Deleting the output files if they exist
         for file in output_files:
@@ -829,8 +884,25 @@ def main():
             age_panel.loc[age_panel[col] < 0, col] = np.nan
     print(f"Replaced all negative values with NaN, except -1 in the 'age' column")
 
-
-
+    # Fixing any incorrectly inputted data
+    # TODO: deciding what to do with the max_age + 1 values
+    # For ages 3-5 variables, if max_age + 1 is filled, shift all values down by one (so 4 -> 3, 6 -> 5, etc.)
+    # For all other variables, just use the interpolated value (done after interpolation)
+    for col in age_panel.columns:
+        if col in ['id', 'age']: 
+            continue
+        if variable_ages[col] == (3, 5): 
+            
+            for id_ in age_panel['id'].unique(): 
+                if 6 in age_panel.loc[(age_panel["id"] == id_), 'age'].values:
+                    value_to_move_6 = age_panel.loc[(age_panel["age"] == 6) & (age_panel["id"] == id_), col].values[0]
+                    value_to_move_4 = age_panel.loc[(age_panel["age"] == 4) & (age_panel["id"] == id_), col].values[0]
+                    if value_to_move_6 != np.nan: 
+                        age_panel.loc[(age_panel["age"] == 5) & (age_panel["id"] == id_), col] = value_to_move_6
+                        if value_to_move_4 != np.nan: 
+                            age_panel.loc[(age_panel["age"] == 3) & (age_panel["id"] == id_), col] = value_to_move_4
+            
+        
     # Sort by child and age for proper interpolation
     age_panel = age_panel.sort_values(['id', 'age'])
 
@@ -873,29 +945,16 @@ def main():
     new_data_interpolated = pd.concat([pre_birth_rows, final_age_panel], ignore_index=True).sort_values(['id', 'age'])
     print("Interpolated data. Here are the first few rows of the dataframe")
     print(new_data_interpolated.head())
-    # Fixing any incorrectly inputted data
+    
+        
+    # Limiting the data between min and max age, replacing all other values with NaN
     for col in new_data_interpolated.columns:
-        if col in ['id', 'age']: 
+        if col in ['id', 'age']:
             continue
         min_age, max_age = variable_ages[col]
-
-        # TODO: deciding what to do with the max_age + 1 values
-        # For now, just make the value in "max_age" 
-        for id_ in new_data_interpolated['id'].unique(): 
-            if max_age + 1 in new_data_interpolated.loc[(new_data_interpolated["id"] == id_), 'age'].values:
-                value_to_move = new_data_interpolated.loc[(new_data_interpolated["age"] == max_age + 1) & (new_data_interpolated["id"] == id_), col].values[0]
-                if value_to_move != np.nan: 
-                    new_data_interpolated.loc[(new_data_interpolated["age"] == max_age) & (new_data_interpolated["id"] == id_), col] = value_to_move
-            
-        # Limiting the data between min and max age, replacing all other values with NaN
         new_data_interpolated.loc[(new_data_interpolated['age'] < min_age) | (new_data_interpolated['age'] > max_age), col] = np.nan
-        
 
-        # NOTE: should we move the whole survey year down, or just move this value down?
-
-            
-    # --- End Interpolation Section ---
-
+    
     # Counting the number of people who are not in the age range for each variable
     print("Checking for out-of-range ages in interpolated data...")
     for col in new_data_interpolated.columns:
@@ -907,10 +966,14 @@ def main():
             print(f"Warning: Column '{col}' has {out_of_range_count} values outside the age range ({min_age}, {max_age}).")
     print("Out-of-range age check completed.")
 
+            
+    # --- End Interpolation Section ---
+
+    
 
     # DEBUGGING: testing whether there are negative values in this part of the data
     for col in new_data_interpolated.columns:
-        if not new_data_interpolated.loc[new_data_interpolated[col] < 0, col].empty: 
+        if (not new_data_interpolated.loc[new_data_interpolated[col] < 0, col].empty) and (col != 'age'): 
             print(f"Column {col} contains negative values from interpolation!")
 
     # Create a graph to show how interpolation is giving negative values
@@ -934,38 +997,27 @@ def main():
     # Create the period data
     period_data = aggregate_period_data(new_data_interpolated, age_periods)
 
-    # Temporary check: printing inflation-adjusted columns
-    print("Here are columns to check out")
-    print(period_data[INFLATION_ADJUSTED_COLUMNS].head(10))
-
-
-    # This is a temporary check to see how many people responded to the Government_Input questions
-    print("Checking Government_Input columns...")
-    for col in categories_of_variables["Government_Inputs"]:
-        if col in new_data.columns:
-            # count the number of unique id's with at least one value for an age
-            unique_ids = new_data.loc[new_data[col].notna(), 'id'].unique()
-            print(f"Column '{col}' has {len(unique_ids)} unique ids with responses.")
-
-        else:
-            print(f"Column '{col}' is not present in the period data.")
 
     # Dropping bad columns
     period_data = period_data.drop(columns=columns_to_drop)
 
-    # Print and save description stats to csv
-    print("\nSummary of period data:")
-    print(period_data.describe(include='all'))
-    period_data_stats = period_data.describe(include='all').transpose()
-    period_data_stats["Category"] = np.nan
-    print(period_data.columns.to_list())
-    for category, column_names in categories_of_variables.items(): 
-        for column in column_names: 
-            if column not in columns_to_drop: 
-                period_data_stats["Category"].iloc[period_data.columns.to_list().index(column)] = category
-        
-    period_data_stats.to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv", mode='w')
-    print("Summary of period data saved")
+    
+    # Counting the number of people who are not in the age range for each variable
+    print("Checking for out-of-range periods in interpolated data...")
+    for col in period_data.columns:
+        if col in ['id', 'period']:
+            continue
+        min_age, max_age = variable_ages[col]
+        acceptable_periods = []
+        for period, (min_age_period, max_age_period) in age_periods.items(): 
+            if min_age <= max_age_period and max_age >= min_age_period: 
+                acceptable_periods.append(period)
+        # print(f"The acceptable periods for {col} are between {min(acceptable_periods)} and {max(acceptable_periods)} (inclusive)")
+        out_of_range_count = period_data.loc[(period_data['period'] < min(acceptable_periods)) | (period_data['period'] > max(acceptable_periods)), col].notna().sum()
+        if out_of_range_count > 0:
+            print(f"Warning: Column '{col}' has {out_of_range_count} values outside the age range ({min_age}, {max_age}).")
+
+    print("Out-of-range age check completed.")
 
 
 
@@ -1030,10 +1082,69 @@ def main():
     period_data.to_csv(period_output_file_path, index=False)
     print(f"Period data saved to {period_output_file_path}")
 
-    
-    period_data_wide = transform_period_data(period_data)
+    # Save description stats to csv
+    # print(period_data.describe(include='all'))  # Uncomment for debugging if needed
+    period_data_stats = period_data.describe(include='all').transpose()
+    period_data_stats["Category"] = ""
+    period_data_stats["Description"] = ""
+    # Assign categories and descriptions to period data columns
+    for category, column_names in categories_of_variables.items(): 
+        for column in column_names: 
+            if column not in columns_to_drop and column in period_data.columns: 
+                period_data_stats.loc[column, "Category"] = category
+                period_data_stats.loc[column, "Description"] = variable_descriptions.get(column, "No description available")
+            else: 
+                print(f"Warning: column {column} not in period_data.columns")
+    period_data_stats.to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv")
+    print(f"Summary of period data saved to {period_output_file_path[:-4]}_Descriptive_Stats.csv")
+    print("Summary of period data saved")
+
+    # Transform the period data to wide format
+    period_data_wide = transform_period_data(new_data_interpolated, period_data)
     period_data_wide.to_csv(period_wide_output_file_path, index=False)
     print(f"Wide period data saved to {period_wide_output_file_path}")
+
+    # Print and save description stats to csv
+    print("\nSummary of wide period data:")
+    print(period_data_wide.describe(include='all'))
+    period_data_wide_stats = period_data_wide.describe(include='all').transpose()
+    period_data_wide_stats["Category"] = ""
+    period_data_wide_stats["Description"] = ""
+
+    # Assign categories and descriptions to wide period data columns
+    for category, column_names in categories_of_variables.items():
+        for column in column_names:
+            # Find all wide columns that start with the variable name (handles suffixes like _P0, _P1, etc.)
+            matching_cols = [c for c in period_data_wide.columns if c.startswith(f"{column}_")]
+            for wide_col in matching_cols:
+                if wide_col not in columns_to_drop:
+                    idx = period_data_wide_stats.index.get_loc(wide_col)
+                    period_data_wide_stats.at[wide_col, "Category"] = category
+                    # Add description, with note if it's a period column
+                    base_desc = variable_descriptions.get(column, "No description available")
+                    # Extract period info from column name
+                    if "_P" in wide_col:
+                        period_num = wide_col.split("_P")[-1]
+                        period_note = f" Period {period_num}: "
+                        period_data_wide_stats.at[wide_col, "Description"] = period_note + base_desc
+                    else:
+                        period_data_wide_stats.at[wide_col, "Description"] = base_desc
+
+    # Also assign categories and descriptions for columns without suffixes (single columns)
+    for category, column_names in categories_of_variables.items():
+        for column in column_names:
+            if column in period_data_wide_stats.index and column not in columns_to_drop:
+                period_data_wide_stats.at[column, "Category"] = category
+                period_data_wide_stats.at[column, "Description"] = variable_descriptions.get(column, "No description available")
+
+    # Group by Description, with "Other" category at the top
+    grouped_stats = period_data_wide_stats.copy()
+    # Add a helper column for sorting: "Other" first, then alphabetical
+    grouped_stats["_sort_key"] = grouped_stats["Category"].apply(lambda x: "0" if x == "Other" else f"1_{x}")
+    grouped_stats = grouped_stats.sort_values("_sort_key").drop(columns="_sort_key")
+    grouped_stats.to_csv(f"{os.path.splitext(period_wide_output_file_path)[0]}_Descriptive_Stats.csv", mode='w')
+    print("Summary of wide period data saved")
+
 
 
     # Save constants to a separate file
