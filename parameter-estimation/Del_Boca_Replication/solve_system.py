@@ -991,7 +991,7 @@ def solve_bounded_system_t4(parameters, household, h4):
                     best_norm = norm
                     best_sol = sol
                     
-                print(f"Relaxed bounds - Guess {guess}: norm = {norm}, solution = {sol.x}")
+                # print(f"Relaxed bounds - Guess {guess}: norm = {norm}, solution = {sol.x}")
             except Exception as e:
                 print(f"Failed with relaxed bounds and guess {guess}: {str(e)}")
                 continue
