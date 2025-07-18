@@ -221,15 +221,15 @@ def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray, hou
     # Error is the percent difference from simulated, not absolute difference (to ensure weighting isn't affected by units)
     diff = (empirical - simulated) / (np.abs(empirical))
     loss = diff.T @ weighting @ diff
-    print(f"Current parameters: {param_vec}")
-    print(f"Current loss: {loss}")
-    print(f"Time elapsed: {time.perf_counter() - ticker}")
-    times_elapsed.append(time.perf_counter() - ticker)
-    print(f"Average time for simulation: {np.average(times_elapsed)}")
+    # print(f"Current parameters: {param_vec}")
+    # print(f"Current loss: {loss}")
+    # print(f"Time elapsed: {time.perf_counter() - ticker}")
+    # times_elapsed.append(time.perf_counter() - ticker)
+    # print(f"Average time for simulation: {np.average(times_elapsed)}")
     return loss
 
 def two_step_smm(empirical: np.ndarray, initial_guess: list, households: np.ndarray, tolerances=[0.01, 0.001], num_workers=0):
-
+    print(f"Running two-step SMM with guess {initial_guess}")
     # Constraints:
     # 1. 0 < rho (parameter[1]) < 1
     # 2. 0 < rho_e (parameter[2]) < 1
@@ -321,6 +321,10 @@ def convergence_test(empirical, parameters, households):
     plt.cla()
     plt.close()
 
+
+# Helper function (to run SMM)
+def run_smm(args):
+    return two_step_smm(*args)
 # TODO: add multiprocessing to grid search
 def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: dict, tolerances: list):
     """
@@ -354,17 +358,25 @@ def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: d
                             continue
                         for delta in delta_range:
                             initial_guesses.append([delta, rho, rho_e, theta_1, theta_2, theta_3])
-                            print("\n\n\n\n")
     
-
-    args_iter = ((empirical, initial_guess, households, tolerances) for initial_guess in initial_guesses)
+    
+    args_iter = [(empirical, initial_guess, households, tolerances) for initial_guess in initial_guesses]
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        results = list(executor.map(lambda args: two_step_smm(*args), args_iter))
+        results = list(executor.map(run_smm, args_iter))
     
     print("Multiprocessing complete. Best solution found")
+    params_list, obj_vals = zip(*results)
+    # Filter out invalid results (None, None)
+    valid_results = [res for res in results if res != (None, None)]
+    if not valid_results:
+        raise ValueError("All two_step_smm calls failed. No valid results to process.")
+    
+    params_list, obj_vals = zip(*valid_results)
+    obj_vals = np.array(obj_vals)
+    best_idx = np.argmin(obj_vals)
+    best_params = np.array(params_list[best_idx])
+    best_obj_val = obj_vals[best_idx]
 
-    best_obj_val = np.min(results[1])
-    best_params = results[0, np.where(results[1] == best_obj_val)]
     return best_params, best_obj_val
 
 def performance_test(empirical, households, num_processes): 
