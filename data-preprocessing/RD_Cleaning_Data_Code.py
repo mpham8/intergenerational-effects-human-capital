@@ -40,21 +40,11 @@ from important_dictionary_variables import categories_of_variables, variable_age
 
 
 
-# TODO: figure out how many data points are outside manual variable ages
-# TODO: trust the moms
-# TODO: exclude data > 2 years outside range (above) or < 1 year outside range (below)
-
-# Notes: 
-# 1. For ages 3-5, shift down. Everything else, interpolate then remove (TODO)
-
-# TODO: change XRND (and similarly aggregated) columns to only have one column
 
 
-# CONSTANTS
 
-# TODO: fix XRND variables
 
-# TODO: add all variables that appear in Attanasio and Del Boca as controls
+
 
 # File paths
 
@@ -62,7 +52,7 @@ from important_dictionary_variables import categories_of_variables, variable_age
 PATH_ENDING = "BEST"
 # Input files 
 nls_file_path = 'data-preprocessing/Initial_Preprocessing/07-08-25-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/06-24-25-mother-renamed.csv'  # File containing mother data, update this path as needed
+mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/07-21-25-mother-renamed.csv'  # File containing mother data, update this path as needed
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
@@ -85,7 +75,19 @@ SEVERAL_TIMES_PER_WEEK = 4
 MORE_THAN_ONCE_PER_DAY = 2
 WEEKS_PER_MONTH = 4.345
 
-INFLATION_ADJUSTED_COLUMNS = ["TNFI_TRUNC", "TOTAL_FAMILY_INCOME_FR_ALL", "FAMILY_INCOME_FROM_ALL_SOUR", "LABOR_INCOME"]
+INFLATION_ADJUSTED_COLUMNS = [
+    "TNFI_TRUNC", 
+    "TOTAL_FAMILY_INCOME_FR_ALL",
+    "FAMILY_INCOME_FROM_ALL_SOUR", 
+    "LABOR_INCOME", 
+    "TRANSFER_INCOME", 
+    'UNEMPR_TOTAL', 
+    'UNEMPSP_TOTAL', 
+    'AFDC_TOTAL', 
+    'FDSTMPS_TOTAL', 
+    'SSI_TOTAL', 
+    'WELFARE_AMT', 
+]
 
 
 
@@ -99,8 +101,6 @@ age_periods = {
 }
 
 columns_to_drop = {
-    # "Q2_15C", 
-    "Q2_15A_PRE", 
     "VERSION_R29_XRND", 
     "TYPE_OF_SCHOOL_RECODE", 
     "MOM_HELPS_CH_W_NONE", 
@@ -109,6 +109,7 @@ columns_to_drop = {
     "DOES_CHILD_NEVER_USE", 
     'TOTAL_FAMILY_INCOME_FR_ALL', 
     'FAMILY_INCOME_FROM_ALL_SOUR', 
+    'Q13_43A'
 
 }
 
@@ -131,6 +132,11 @@ column_prefixes_to_remove = [
     'HOME_D_',
     'CHECK_',  
     'MS_', 
+]
+
+# List of suffixes for columns that should be removed when naming columns
+column_suffixes_to_remove = [
+    '_REVISED_XRND', 
 ]
 
 # Dictionary to map poorly-named columns to their intended names (basically, handling exceptions in the CLNS79 data)
@@ -212,6 +218,10 @@ poorly_named_columns = {
     'HIGHEST_GRADE_R_HAS_COMPLET' : 'HIGHEST_GRADE_OF_REGULAR_SC', 
     'Q13_5_TRUNC' : 'Q13_5', 
     'Q13_5_TRUNC_REVISED' : 'Q13_5', 
+    'URBAN_RURAL_REV' : 'URBAN_RURAL',
+    'Q1_3_A_M' : 'MOTHER_BIRTH_MONTH',
+    'Q1_3_A_Y' : 'MOTHER_BIRTH_YEAR',
+
     
     # NOTE: combine Q2_15A and Q2_15A_PRE?
 }
@@ -260,6 +270,7 @@ rescaling_variables = {
     'MOM_HELPS_CH_LEARN_COLORS': [1, 1, 1, 1, 1], 
     'MOM_HELPS_CH_W_NONE': [1, 1, 1, 1, 1],
     'DO_PARS_DISCUSS_TV': [1, np.nan, np.nan, np.nan, np.nan, np.nan],
+    'URBAN_RURAL' : [1, np.nan]
     
 }
 
@@ -323,6 +334,8 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                     # print(f"Removing prefix '{prefix}' from column name: {column_name}")
                     # Remove the prefix from the column name
                     column_name = column_name[len(prefix):]
+                
+                
 
             # If the column name is in the poorly named columns dictionary, rename it with the better name
             if column_name in poorly_named_columns:
@@ -396,13 +409,214 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 new_data.drop(columns=['year_new'], inplace=True)
 
         
-        # TODO: check variables for interpolation (only interpolate with min_age and max_age + 1)
         
         
         
         # If neither of these are true, throw an error
         else: 
             raise ValueError(f"Column {column} does not end with 'XRND' or a year. Please check the data format.")
+        
+
+    
+    # Combine the data with the regular NLSY79 data
+    try:
+        mother_data = pd.read_csv(mother_data_file_path)
+    except FileNotFoundError:
+        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+        raise
+
+    mother_data = pd.DataFrame(mother_data)
+
+    for column in mother_data.columns:
+        
+        # print(f"Processing column: {column}")
+        # Remove any prefixes from the column name
+        column_name = column
+        # Checking if the 9th to 5th last characters are digits (i.e., a year)
+        if column_name[-9:-5].isdigit():
+            # For handling this specific case (occurring with the transfer variables), we will remove the "XRND" part
+            column_name = column_name[:-5]  # Remove the last 5 characters (the XRND and the underscore)
+
+        for suffix in column_suffixes_to_remove:
+            if column_name.endswith(suffix):
+                # print(f"Removing suffix '{suffix}' from column name: {column_name}")
+                # Remove the suffix from the column name
+                column_name = column_name[:-len(suffix)]
+
+        if column_name == 'CASEID_1979':
+            continue
+            
+        
+        # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
+        elif column_name[-4:].isdigit():  # Check if the last 4 characters are digits
+            if column_name[-4:].isdigit():
+                year = int(column_name[-4:])
+                # Find the column name, removing the year part (plus the underscore)
+                column_name = column_name[:-5]
+            
+            # Remove any lingering dates
+            if column_name[-2:].isdigit() and not column_name.startswith("ASVAB"):
+                # Find the column name, removing the year part (plus the underscore)
+                column_name = column_name[:-2]
+
+            # Filter out unwanted prefixes from the column name
+            for prefix in column_prefixes_to_remove:
+                if column_name.startswith(prefix):
+                    # print(f"Removing prefix '{prefix}' from column name: {column_name}")
+                    # Remove the prefix from the column name
+                    column_name = column_name[len(prefix):]
+            
+            for suffix in column_suffixes_to_remove:
+                if column_name.endswith(suffix):
+                    # print(f"Removing suffix '{suffix}' from column name: {column_name}")
+                    # Remove the suffix from the column name
+                    column_name = column_name[:-len(suffix)]
+
+            # If the column name is in the poorly named columns dictionary, rename it with the better name
+            if column_name in poorly_named_columns:
+                column_name = poorly_named_columns[column_name]
+            
+
+
+
+
+            # # FOR TESTING PURPOSES: continue if not in the special columns for testing
+            # if column_name not in special_columns_for_testing:
+            #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
+            #     continue
+
+            
+            
+            
+            
+            
+
+            # Check if the column already exists in new_data
+            if column_name not in new_data.columns:
+                # If not, create it with NaN values
+                new_data[column_name] = np.nan
+            
+            
+            # Efficiently map mother data to child data for this column and year
+            # Create a mapping from child id to (CYRB_XRND, MPUBID_XRND)
+            id_to_birthyear = nls_data.set_index('id')['CYRB_XRND'].to_dict()
+            id_to_motherid = nls_data.set_index('id')['MPUBID_XRND'].to_dict()
+            # Create a mapping from mother id to column value
+            mother_col_map = mother_data.set_index('CASEID_1979')[column].to_dict()
+
+            # For all children, compute the child's age at this year and the value from mother data
+            ids = new_data['id'].unique()
+            child_ages = {id_: year - id_to_birthyear[id_] for id_ in ids}
+            mother_values = {id_: mother_col_map.get(id_to_motherid[id_], np.nan) for id_ in ids}
+
+            # Assign values in one go
+            mask = new_data['age'] == new_data['id'].map(child_ages)
+            new_data.loc[mask, column_name] = new_data.loc[mask, 'id'].map(mother_values)
+
+
+            # Ensure we have a pre-birth age (-1) value for each child for the column
+            if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
+                # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
+                # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
+                negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name] >= 0)]['age']
+                if not negative_ages.empty:
+                    greatest_negative_age = negative_ages.max()
+                    # Fill in the value for the corresponding age -1
+                    for id in new_data['id'].unique():
+                        new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
+                
+
+        # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
+        else: 
+            # Put out a warning if column doesn't end with XRND
+            if not column_name.endswith("XRND"):
+                print(f"Column {column_name} does not end with 'XRND'. It will be added to all ages for each child.")
+            # Add the mother's XRND variable to all ages for each child
+            # First, map CASEID_1979 to id
+            mother_id = mother_data['CASEID_1979']
+            mother_col = mother_data[column]
+            # Create a mapping from CASEID_1979 to the column value
+            mother_map = dict(zip(mother_id, mother_col))
+            # Fill in the value for all ages for each child
+            new_data[column_name] = new_data['MPUBID_XRND'].map(mother_map)
+
+    # Adding "Number of Older Siblings" and "Number of Children" columns using child IDs and mother IDs
+    for child_id in nls_data['id'].unique(): 
+        mother_id = nls_data.loc[nls_data['id'] == child_id, 'MPUBID_XRND'].values[0]
+        siblings = nls_data.loc[nls_data['MPUBID_XRND'] == mother_id, 'id'].unique()
+        child_age = nls_data.loc[nls_data['id'] == child_id, 'CYRB_XRND'].values[0]
+        num_siblings = len(siblings)
+        num_older_siblings = 0
+        for sibling in siblings: 
+            # If the sibling is the child itself, skip it
+            if sibling == child_id: 
+                continue
+            # Get the age of the sibling
+            sibling_age = nls_data.loc[nls_data['id'] == sibling, 'CYRB_XRND'].values[0]
+            # Get the age of the child
+            child_age = nls_data.loc[nls_data['id'] == child_id, 'CYRB_XRND'].values[0]
+            # If the sibling is older than the child, increment the "Number of Older Siblings" column for the child
+            if sibling_age < child_age: 
+                num_older_siblings += 1
+
+        new_data.loc[new_data['id'] == child_id, 'NUM_OLDER_SIBLINGS'] = num_older_siblings
+        new_data.loc[new_data['id'] == child_id, 'NUM_CHILDREN'] = num_siblings
+
+    
+    # Adding transfer income column (aggregation of all transfer income columns)
+    transfer_income_columns = ['UNEMPR_TOTAL', 'UNEMPSP_TOTAL', 'WELFARE_AMT']
+    new_data['TRANSFER_INCOME'] = new_data[transfer_income_columns].sum(axis=1)
+
+
+
+    
+    # Renaming columns
+    for column in new_data.columns:
+        if column in better_named_columns: 
+            # If the column is in the better named columns dictionary, rename it with the better name
+            new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
+
+
+    # Adding mother age column
+    # We will use the MOTHER_BIRTH_YEAR column, along with the year column, to calculate the mother's age for every row
+    if 'MOTHER_BIRTH_YEAR' in new_data.columns and 'year' in new_data.columns:
+        new_data['MOTHER_AGE'] = new_data['year'] - new_data['MOTHER_BIRTH_YEAR']
+    else:
+        print("Warning: 'MOTHER_BIRTH_YEAR' or 'year' column not found. 'MOTHER_AGE' will not be calculated.")
+    
+    # Rescale columns
+    # Rescale columns according to rescaling_variables
+    print("Rescaling columns...")
+    for column in new_data.columns:
+        if column in rescaling_variables:
+            old_values = np.arange(1, len(rescaling_variables[column]) + 1)
+            new_values = rescaling_variables[column]
+            new_data[column] = new_data[column].replace(dict(zip(old_values, new_values)))
+            # print(f"Rescaled column {column}")
+
+    # Rescale columns according to rescaling_variables_by_age
+    for entry in rescaling_variables_by_age:
+        col_name, (start_age, end_age), new_values = entry
+        old_values = np.arange(1, len(new_values) + 1)
+        mask = (new_data['age'] >= start_age) & (new_data['age'] <= end_age)
+        if col_name in new_data.columns:
+            new_data.loc[mask, col_name] = new_data.loc[mask, col_name].replace(dict(zip(old_values, new_values)))
+            # print(f"Rescaled column {col_name} for ages {start_age}-{end_age}")
+
+
+    # Rescale columns according to inflation adjustment
+    CPI_values = get_CPI_values(CPI_file_path)
+    for column in new_data.columns: 
+        if column in INFLATION_ADJUSTED_COLUMNS: 
+            # Rescale the column by the CPI value
+            new_data[column] = new_data.apply(
+                lambda row: row[column] * (CPI_values.get(row['year'], 1) / CPI_values.get(1979, 1)),
+                axis=1
+            )
+
+
+    # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
+    new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
 
     return new_data
 
@@ -673,151 +887,10 @@ def main():
 
 
 
-    # Combine the data with the regular NLSY79 data
-    try:
-        mother_data = pd.read_csv(mother_data_file_path)
-    except FileNotFoundError:
-        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
-        raise
-
-    mother_data = pd.DataFrame(mother_data)
-
-    for column in mother_data.columns:
-        
-        # print(f"Processing column: {column}")
-        # Skip the 'id' column
-        if column == 'CASEID_1979':
-            continue
-            
-
-        # If the column ends in a date (e.g. 1979, 1980, etc.), we need to find the age of the child at that date
-        elif column[-4:].isdigit():  # Check if the last 4 characters are digits
-            if column[-4:].isdigit():
-                year = int(column[-4:])
-                # Find the column name, removing the year part (plus the underscore)
-                column_name = column[:-5]
-            
-            # Remove any lingering dates
-            if column_name[-2:].isdigit() and not column_name.startswith("ASVAB"):
-                # Find the column name, removing the year part (plus the underscore)
-                column_name = column_name[:-2]
-
-            # Filter out unwanted prefixes from the column name
-            for prefix in column_prefixes_to_remove:
-                if column_name.startswith(prefix):
-                    # print(f"Removing prefix '{prefix}' from column name: {column_name}")
-                    # Remove the prefix from the column name
-                    column_name = column_name[len(prefix):]
-
-            # If the column name is in the poorly named columns dictionary, rename it with the better name
-            if column_name in poorly_named_columns:
-                column_name = poorly_named_columns[column_name]
-            
+    
 
 
-
-
-            # # FOR TESTING PURPOSES: continue if not in the special columns for testing
-            # if column_name not in special_columns_for_testing:
-            #     # print(f"Skipping column {column} as it is not in the special columns for testing.")
-            #     continue
-
-            
-            
-            
-            
-            
-
-            # Check if the column already exists in new_data
-            if column_name not in new_data.columns:
-                # If not, create it with NaN values
-                new_data[column_name] = np.nan
-            
-            
-            # Efficiently map mother data to child data for this column and year
-            # Create a mapping from child id to (CYRB_XRND, MPUBID_XRND)
-            id_to_birthyear = nls_data.set_index('id')['CYRB_XRND'].to_dict()
-            id_to_motherid = nls_data.set_index('id')['MPUBID_XRND'].to_dict()
-            # Create a mapping from mother id to column value
-            mother_col_map = mother_data.set_index('CASEID_1979')[column].to_dict()
-
-            # For all children, compute the child's age at this year and the value from mother data
-            ids = new_data['id'].unique()
-            child_ages = {id_: year - id_to_birthyear[id_] for id_ in ids}
-            mother_values = {id_: mother_col_map.get(id_to_motherid[id_], np.nan) for id_ in ids}
-
-            # Assign values in one go
-            mask = new_data['age'] == new_data['id'].map(child_ages)
-            new_data.loc[mask, column_name] = new_data.loc[mask, 'id'].map(mother_values)
-
-
-            # Ensure we have a pre-birth age (-1) value for each child for the column
-            if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
-                # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
-                # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
-                negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name] >= 0)]['age']
-                if not negative_ages.empty:
-                    greatest_negative_age = negative_ages.max()
-                    # Fill in the value for the corresponding age -1
-                    for id in new_data['id'].unique():
-                        new_data.loc[(new_data['id'] == id) & (new_data['age'] == -1), column_name] = new_data.loc[(new_data['id'] == id) & (new_data['age'] == greatest_negative_age), column_name].values[0]
-                
-
-        # If the column ends with XRND (or anything else, for that matter), it doesn't need to be adjusted for age, so we can fill it in for all ages, merging it with the new_data DataFrame
-        else: 
-            # Put out a warning if column doesn't end with XRND
-            if not column.endswith("XRND"):
-                print(f"Column {column} does not end with 'XRND'. It will be added to all ages for each child.")
-            # Add the mother's XRND variable to all ages for each child
-            # First, map CASEID_1979 to id
-            mother_id = mother_data['CASEID_1979']
-            mother_col = mother_data[column]
-            # Create a mapping from CASEID_1979 to the column value
-            mother_map = dict(zip(mother_id, mother_col))
-            # Fill in the value for all ages for each child
-            new_data[column] = new_data['MPUBID_XRND'].map(mother_map)
-
-
-    # Renaming columns
-    for column in new_data.columns:
-        if column in better_named_columns: 
-            # If the column is in the better named columns dictionary, rename it with the better name
-            new_data.rename(columns={column: better_named_columns[column]}, inplace=True)
-
-
-    # Rescale columns
-    # Rescale columns according to rescaling_variables
-    print("Rescaling columns...")
-    for column in new_data.columns:
-        if column in rescaling_variables:
-            old_values = np.arange(1, len(rescaling_variables[column]) + 1)
-            new_values = rescaling_variables[column]
-            new_data[column] = new_data[column].replace(dict(zip(old_values, new_values)))
-            # print(f"Rescaled column {column}")
-
-    # Rescale columns according to rescaling_variables_by_age
-    for entry in rescaling_variables_by_age:
-        col_name, (start_age, end_age), new_values = entry
-        old_values = np.arange(1, len(new_values) + 1)
-        mask = (new_data['age'] >= start_age) & (new_data['age'] <= end_age)
-        if col_name in new_data.columns:
-            new_data.loc[mask, col_name] = new_data.loc[mask, col_name].replace(dict(zip(old_values, new_values)))
-            # print(f"Rescaled column {col_name} for ages {start_age}-{end_age}")
-
-
-    # Rescale columns according to inflation adjustment
-    CPI_values = get_CPI_values(CPI_file_path)
-    for column in new_data.columns: 
-        if column in INFLATION_ADJUSTED_COLUMNS: 
-            # Rescale the column by the CPI value
-            new_data[column] = new_data.apply(
-                lambda row: row[column] * (CPI_values.get(row['year'], 1) / CPI_values.get(1979, 1)),
-                axis=1
-            )
-
-
-    # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
-    new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
+    
 
 
     # 2a. Running some checks on the new_data DataFrame and saving it to a new file
@@ -885,7 +958,6 @@ def main():
     print(f"Replaced all negative values with NaN, except -1 in the 'age' column")
 
     # Fixing any incorrectly inputted data
-    # TODO: deciding what to do with the max_age + 1 values
     # For ages 3-5 variables, if max_age + 1 is filled, shift all values down by one (so 4 -> 3, 6 -> 5, etc.)
     # For all other variables, just use the interpolated value (done after interpolation)
     for col in age_panel.columns:
@@ -940,7 +1012,6 @@ def main():
         .apply(fill_edges)
         .reset_index(drop=True)
     )
-
     # Combine interpolated ages 0–19 with pre-birth rows, and sort
     new_data_interpolated = pd.concat([pre_birth_rows, final_age_panel], ignore_index=True).sort_values(['id', 'age'])
     print("Interpolated data. Here are the first few rows of the dataframe")
@@ -1087,14 +1158,18 @@ def main():
     period_data_stats = period_data.describe(include='all').transpose()
     period_data_stats["Category"] = ""
     period_data_stats["Description"] = ""
-    # Assign categories and descriptions to period data columns
+    # Assign categories to period data columns
     for category, column_names in categories_of_variables.items(): 
         for column in column_names: 
             if column not in columns_to_drop and column in period_data.columns: 
                 period_data_stats.loc[column, "Category"] = category
-                period_data_stats.loc[column, "Description"] = variable_descriptions.get(column, "No description available")
             else: 
                 print(f"Warning: column {column} not in period_data.columns")
+    # Assign descriptions to period data columns
+    for column in variable_descriptions.keys():
+        if column in period_data.columns and column not in columns_to_drop:
+            period_data_stats.loc[column, "Description"] = variable_descriptions[column]
+    
     period_data_stats.to_csv(f"{period_output_file_path[:-4]}_Descriptive_Stats.csv")
     print(f"Summary of period data saved to {period_output_file_path[:-4]}_Descriptive_Stats.csv")
     print("Summary of period data saved")

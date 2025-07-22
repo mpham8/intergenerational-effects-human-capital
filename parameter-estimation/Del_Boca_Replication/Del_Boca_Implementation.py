@@ -64,7 +64,7 @@ MU_WAGE_RATE_GROWTH = 0.07
 ETA_STD_WAGE_RATE_GROWTH = 0.02
 
 # --------------- PARAMETERS ---------------
-num_workers = 0  # Number of CPU cores to use, set to None to use all available cores
+num_workers = 0  # Number of CPU cores to use, set to zero to use all available cores
 
 # Actual parameters to estimate 
 
@@ -90,14 +90,15 @@ STEP_SIZES = {
 }
 # Initial guesses for parameters (NOT APPLICABLE IN CURRENT CODE)
 parameters = [
-    10,  # Delta parameter
-    -0.5, # rho
-    -0.5, # rho_e
-    0.4, # theta_1
-    0.2, # theta_2
-    0.2, # theta_3
+    12,  # Delta parameter
+    -0.3, # rho
+    -0.2, # rho_e
+    0.35, # theta_1
+    0.15, # theta_2
+    0.25, # theta_3
 # TODO: check if this is wrong (shouldn't I have different thetas over time?)
 ]
+parameters_to_optimize = [12, -0.3,-0.2,0.35, 0.15, 0.25]
 # Ranges for parameters
 # rho (and rho_e): -5 to 0.5
 # thetas: 0 to 1
@@ -105,7 +106,7 @@ parameters = [
 
 times_elapsed = []
 
-
+# TODO: look into Del Boca
 # ----------------- FUNCTIONS ---------------------
 def load_latent_factors(filepath): 
     # Random parameters, since we don't have any data
@@ -128,6 +129,7 @@ def create_households(num_households: int) -> np.ndarray:
     households = np.zeros((num_households, NUM_PERIODS, 7))
 
     # Parents' human capital
+    # TODO: substitute this with draws from an observed proxy for parents' human capital
     parents_hc = np.random.normal(1, 0.2, (num_households, 1))
     households[:, :, 0] = parents_hc * np.ones((1, NUM_PERIODS))
     
@@ -140,6 +142,7 @@ def create_households(num_households: int) -> np.ndarray:
 
 
     # Government inputs
+    # TODO: create 
     government_input_means = [0.0005, 0.019, 0.017, 0.013]
     government_input_stds = [0.0001, 0.004, 0.003, 0.002]
     for i in range(NUM_PERIODS): 
@@ -204,10 +207,19 @@ def moments(households):
     
     return np.array(moments)
 
+# Helper function to check if a matrix is positive semi-definite (PSD)
+def isPSD(A, tol=1e-8):
+  E = np.linalg.eigvalsh(A)
+  return np.all(E > -tol)
+
 def compute_weighting_matrix(moment_list: np.ndarray) -> np.ndarray:
     moment_list = np.atleast_2d(moment_list)
     S = np.cov(moment_list.T)
-    return np.linalg.pinv(S)
+    final = np.linalg.pinv(S)
+    if not isPSD(final):
+        print("Warning: Covariance matrix is not positive semi-definite. This may cause errors")
+    
+    return final
 
 def simulate_moments(param_vec: list, households: np.ndarray, num_workers=0) -> np.ndarray:
     # Creating the households
@@ -221,15 +233,17 @@ def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray, hou
     # Error is the percent difference from simulated, not absolute difference (to ensure weighting isn't affected by units)
     diff = (empirical - simulated) / (np.abs(empirical))
     loss = diff.T @ weighting @ diff
-    # print(f"Current parameters: {param_vec}")
-    # print(f"Current loss: {loss}")
-    # print(f"Time elapsed: {time.perf_counter() - ticker}")
-    # times_elapsed.append(time.perf_counter() - ticker)
-    # print(f"Average time for simulation: {np.average(times_elapsed)}")
+    if loss < 0: 
+        print(f"Warning: Loss is negative with a value of {loss}. This may cause issues with optimization.")
+    print(f"Current parameters: {param_vec}")
+    print(f"Current loss: {loss}")
+    print(f"Time elapsed: {time.perf_counter() - ticker}")
+    times_elapsed.append(time.perf_counter() - ticker)
+    print(f"Average time for simulation: {np.average(times_elapsed)}")
     return loss
 
-def two_step_smm(empirical: np.ndarray, initial_guess: list, households: np.ndarray, tolerances=[0.01, 0.001], num_workers=0):
-    print(f"Running two-step SMM with guess {initial_guess}")
+def two_step_smm(empirical: np.ndarray, initial_guess, households: np.ndarray, tolerances=[0.01, 0.001], num_workers=0):
+    # print(f"Running two-step SMM with guess {np.ndarray(initial_guess)}")
     # Constraints:
     # 1. 0 < rho (parameter[1]) < 1
     # 2. 0 < rho_e (parameter[2]) < 1
@@ -260,14 +274,17 @@ def two_step_smm(empirical: np.ndarray, initial_guess: list, households: np.ndar
         print("\nInitial guesses for parameters:")
         print(res1.x)
         theta_1 = res1.x
-        sims = np.array([simulate_moments(theta_1) for _ in range(10)])
+        sims = np.ndarray((100, NUM_MOMENTS))
+        for i in range(100): 
+            households = create_households(NUMBER_OF_HOUSEHOLDS)
+            sims[i] = simulate_moments(theta_1, households, num_workers)
         print("Computing more optimal weighting matrix...")
         W2 = compute_weighting_matrix(sims)
         print("Starting second step of SMM")
         res2 = minimize(
             objective,
             theta_1,
-            args=(empirical, W2, num_workers),
+            args=(empirical, W2, households, num_workers),
             method=METHOD_OPTIMIZATION,
             bounds=bounds,
             options={'disp': True},
@@ -325,7 +342,7 @@ def convergence_test(empirical, parameters, households):
 # Helper function (to run SMM)
 def run_smm(args):
     return two_step_smm(*args)
-# TODO: add multiprocessing to grid search
+
 def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: dict, tolerances: list):
     """
     Performs a grid search over initial guesses for parameters and finds the global minimum.
@@ -333,12 +350,12 @@ def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: d
     Returns best_params, best_obj_val
     """
     
-    delta_range = np.arange(1.0, 100+step_sizes["Delta"], step_sizes["Delta"])
-    rho_range = np.arange(-5, 0.5+step_sizes["Rho_val"], step_sizes["Rho_val"])
-    rho_e_range = np.arange(-5, 0.5+step_sizes["Rho_e_val"], step_sizes["Rho_e_val"])
-    theta_1_range = np.arange(0.1, 1+step_sizes["theta_1"], step_sizes["theta_1"])
-    theta_2_range = np.arange(0.1, 1+step_sizes["theta_2"], step_sizes["theta_2"])
-    theta_3_range = np.arange(0.1, 1+step_sizes["theta_3"], step_sizes["theta_3"])
+    delta_range = np.arange(1.0, 101+step_sizes["Delta"], step_sizes["Delta"])
+    rho_range = np.arange(-5.0, 0.5+step_sizes["Rho_val"], step_sizes["Rho_val"])
+    rho_e_range = np.arange(-5.0, 0.5+step_sizes["Rho_e_val"], step_sizes["Rho_e_val"])
+    theta_1_range = np.arange(0.1, 1.0+step_sizes["theta_1"], step_sizes["theta_1"])
+    theta_2_range = np.arange(0.1, 1.0+step_sizes["theta_2"], step_sizes["theta_2"])
+    theta_3_range = np.arange(0.1, 1.0+step_sizes["theta_3"], step_sizes["theta_3"])
 
     # theta_4 is determined by 1 - (theta_1 + theta_2 + theta_3)
     
@@ -359,7 +376,7 @@ def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: d
                         for delta in delta_range:
                             initial_guesses.append([delta, rho, rho_e, theta_1, theta_2, theta_3])
     
-    
+    print(f"Number of initial guesses: {len(initial_guesses)}")
     args_iter = [(empirical, initial_guess, households, tolerances) for initial_guess in initial_guesses]
     with concurrent.futures.ProcessPoolExecutor() as executor:
         results = list(executor.map(run_smm, args_iter))
@@ -410,6 +427,8 @@ def performance_test(empirical, households, num_processes):
     plt.savefig("Performance_Test_Two_Step_SMM.png")
     return performance_times, param_estimates
 
+
+# TODO: write a function that creates a plot of confidence intervals for each parameter in Del Boca, all in one graph
 # ------- HELPER FUNCTIONS --------------
 
 # COPIED FROM INTERNET
@@ -548,37 +567,35 @@ def main():
     # condition_number(parameters)
     
     # TODO: replace following code with commented line below it
-    parameters_to_optimize = [12, -0.2,-0.2,0.35, 0.15, 0.25]
+    
     households_empirical = create_households(NUMBER_OF_HOUSEHOLDS)
-    empirical = np.average([simulate_moments(parameters_to_optimize, households_empirical) for _ in range(2)], axis=0) # Placeholder
+    empirical = np.average([simulate_moments(parameters_to_optimize, households_empirical) for _ in range(100)], axis=0) # Placeholder
     print("Here are our empirical moments: ")
     print(empirical)
     # empirical = load_latent_factors(LATENT_FACTOR_FILEPATH)
 
     # Performing the grid search SMM
     households_simulated = create_households(NUMBER_OF_HOUSEHOLDS)
-    # param_test, func  = two_step_smm(empirical, initial_guess=parameters, households=households_simulated, tolerances=[0.1, 0.01])
-    # print(param_test)
-    # print(func)
-    param_estimates, obj_val = grid_search_smm(empirical, households_simulated, STEP_SIZES, tolerances=[0.05, 0.005])
-    print("Estimated Parameters:", param_estimates)
-    print("Objective Function Value:", obj_val)
+    param_test, func = two_step_smm(empirical, initial_guess=parameters, households=households_simulated, tolerances=[0.1, 0.01])
+    print(param_test)
+    print(func)
 
     # Writing the parameter estimates to a file
     with open(PARAM_OUTPUT_FILEPATH, "w") as f:
         f.write("Parameter estimates from Simulated Method of Moments")
         for i in range(len(PARAMETER_NAMES)): 
-            f.write(f"{PARAMETER_NAMES[i]}: {param_estimates[i]}")
+            f.write(f"{PARAMETER_NAMES[i]}: {param_test[i]}")
     
     toc = time.perf_counter()
-    print(f"Total time for grid search simulation (in seconds): {toc - tic}")
+    print(f"Total time for two step simulation (in seconds): {toc - tic}")
+
 
     # Performance testing
     performance_test(empirical, households_simulated, num_processes=16)
 
     # Confidence intervals
-    lower, upper = bootstrap_confidence_intervals(empirical, param_estimates, B=10)
-    with open(PARAM_OUTPUT_FILEPATH, "a"):
+    lower, upper = bootstrap_confidence_intervals(empirical, parameters, B=10)
+    with open(PARAM_OUTPUT_FILEPATH, "a") as f:
         f.write("Bootstrapped confidence intervals for Simulated Method of Moments")
         for i in range(len(PARAMETER_NAMES)): 
             f.write(f"{PARAMETER_NAMES[i]}: ({lower[i]}, {upper[i]})")
@@ -586,14 +603,14 @@ def main():
     # Convergence test
     convergence_test(empirical, parameters, households_simulated)
 
+    
+    
+    param_estimates, obj_val = grid_search_smm(empirical, households_simulated, STEP_SIZES, tolerances=[0.05, 0.005])
+    print("Estimated Parameters:", param_estimates)
+    print("Objective Function Value:", obj_val)
     toc = time.perf_counter()
-    print(f"Total time for two step simulation (in seconds): {toc - tic}")
-    
+    print(f"Total time for grid search simulation (in seconds): {toc - tic}")
 
-    
-
-    # bootstrap_confidence_intervals(empirical, param_estimates)
-    # convergence_test(empirical, parameters)
 
 
     
