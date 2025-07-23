@@ -5,7 +5,7 @@
 #SBATCH --nodes=1                  # Number of nodes you require
 #SBATCH --cpus-per-task=16          # Cores per task (>1 if multithread tasks)
 #SBATCH --mem-per-cpu=16gb         # Real memory per cpu
-#SBATCH --time=00-24:00:00         # Total run time limit (DD-HH:MM:SS)
+#SBATCH --time=02-00:00:00         # Total run time limit (DD-HH:MM:SS)
 #SBATCH --output=slurm.del-boca.%N.%j.out   # STDOUT file for SLURM output
 #SBATCH --mail-type=ALL            # Email if anything happens (job start, end, failure, requeue, etc.)
 #SBATCH --mail-user=btaheri1@swarthmore.edu

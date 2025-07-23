@@ -28,10 +28,10 @@ local raw_data_folder = "Raw_Data"
 // REPLACE ABOVE WITH YOUR FILEPATH
 
 local cnls_filepath = "07-08-25-child" // if downloaded data from NLS: replace with your data name
-local nls79_filepath = "07-21-better-mother-data"
+local nls79_filepath = "07-22-mother-data"
 local rename_variable_labels_filepath = "Initial_Preprocessing/Rename_Names_To_Labels.do" // ALSO REPLACE
 local cnls_save_filepath = "07-08-25-renamed.csv"
-local nls79_save_filepath = "07-21-25-mother-renamed.csv"
+local nls79_save_filepath = "07-22-25-mother-renamed.csv"
 
 
 local cnls_dct_filepath = "`raw_data_folder'/`cnls_filepath'/`cnls_filepath'.dct"

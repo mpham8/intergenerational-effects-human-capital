@@ -198,7 +198,7 @@ variable_ages = {
     'MOTHER_BIRTH_YEAR' : (-1, 19), 
     'MOTHER_BIRTH_MONTH' : (-1, 19),
     'MOTHER_AGE' : (-1, 19), 
-    'Q13_43A' : (-1, 19),
+    'SSDI_TOTAL' : (-1, 19),
 }
 
 variable_descriptions = {
@@ -288,8 +288,9 @@ variable_descriptions = {
     'FDSTMPS_TOTAL' : "Total food stamps received by R (USD)",
     'SSI_TOTAL' : "Total Supplemental Security Income (SSI) received by R (USD)",
     'WELFARE_AMT' : "Aggregation of AFDC_TOTAL, FDSTMPS_TOTAL, and SSI_TOTAL (defined as 'WELFARE' by the survey) (USD)",
-    'TRANSFER_INCOME' : "Total income received from government transfers (aggregation of UNEMPR_TOTAL, UNEMPSP_TOTAL, WELFARE_AMT) (USD)",
+    'TRANSFER_INCOME' : "Total income received from government transfers (aggregation of UNEMPR_TOTAL, UNEMPSP_TOTAL, AFDC_TOTAL, FDSTMPS_TOTAL, SSI_TOTAL, SSDI_TOTAL) (USD)",
     'MOTHER_BIRTH_YEAR' : "Year of mother's birth (year)",
     'MOTHER_BIRTH_MONTH' : "Month of mother's birth (month, 1-12)",
     'MOTHER_AGE' : "Mother's age at survey year (years)",
+    'SSDI_TOTAL' : "Total income from SSDI received by R (separated from SSI_TOTAL in 2017) (USD)"
 }

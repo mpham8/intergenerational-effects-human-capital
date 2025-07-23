@@ -50,9 +50,9 @@ from important_dictionary_variables import categories_of_variables, variable_age
 
 # File path ending (it's the same across all output paths)
 PATH_ENDING = "BEST"
-# Input files 
+# Input files
 nls_file_path = 'data-preprocessing/Initial_Preprocessing/07-08-25-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/07-21-25-mother-renamed.csv'  # File containing mother data, update this path as needed
+mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/07-22-25-mother-renamed.csv'  # File containing mother data, update this path as needed
 CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
 
 # Output files
@@ -109,7 +109,6 @@ columns_to_drop = {
     "DOES_CHILD_NEVER_USE", 
     'TOTAL_FAMILY_INCOME_FR_ALL', 
     'FAMILY_INCOME_FROM_ALL_SOUR', 
-    'Q13_43A'
 
 }
 
@@ -304,9 +303,8 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     new_data['id'] = np.repeat(nls_data['id'].unique(), 20+PREBIRTH_AGES_PER_CHILD)
     # Create the 'age' column such that it contains the ages from 0 to 19 for each child
     new_data['age'] = np.tile(np.arange(-PREBIRTH_AGES_PER_CHILD, 20), len(nls_data['id'].unique()))
-    # Initialize the Year column with NaN
+    # Initialize the Year column with its actual value (which is the year of the survey, or the year of the child's birth + the age)
     new_data['year'] = np.nan
-
     print(new_data.head())
     for column in nls_data.columns:
         # print(f"Processing column: {column}")
@@ -416,7 +414,16 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
         else: 
             raise ValueError(f"Column {column} does not end with 'XRND' or a year. Please check the data format.")
         
-
+    # Adding all the years that weren't added to the data
+    for child_id in new_data['id'].unique():
+        # Get the birth year of the child
+        birth_year = nls_data[nls_data['id'] == child_id]['CYRB_XRND'].values[0]
+        # Loop through the ages and make sure all have a corresponding year
+        for age in range(-PREBIRTH_AGES_PER_CHILD, 20):
+            # If the year is not already in the data, add it
+            if new_data[(new_data['id'] == child_id) & (new_data['age'] == age)]['year'].isnull().any():
+                # Set the year to the birth year + age
+                new_data.loc[(new_data['id'] == child_id) & (new_data['age'] == age), 'year'] = birth_year + age
     
     # Combine the data with the regular NLSY79 data
     try:
@@ -435,6 +442,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
         # Checking if the 9th to 5th last characters are digits (i.e., a year)
         if column_name[-9:-5].isdigit():
             # For handling this specific case (occurring with the transfer variables), we will remove the "XRND" part
+            # print(f"Making sure {column_name} is a special case")
             column_name = column_name[:-5]  # Remove the last 5 characters (the XRND and the underscore)
 
         for suffix in column_suffixes_to_remove:
@@ -564,8 +572,9 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
     
     # Adding transfer income column (aggregation of all transfer income columns)
-    transfer_income_columns = ['UNEMPR_TOTAL', 'UNEMPSP_TOTAL', 'WELFARE_AMT']
-    new_data['TRANSFER_INCOME'] = new_data[transfer_income_columns].sum(axis=1)
+    transfer_income_columns = ['UNEMPR_TOTAL', 'UNEMPSP_TOTAL', 'AFDC_TOTAL', 'FDSTMPS_TOTAL', 'SSI_TOTAL', 'SSDI_TOTAL']
+    # Aggregate the transfer income columns by summing them up, treating NaN values as 0
+    new_data['TRANSFER_INCOME'] = new_data[transfer_income_columns].fillna(0).sum(axis=1)
 
 
 
@@ -609,8 +618,9 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     for column in new_data.columns: 
         if column in INFLATION_ADJUSTED_COLUMNS: 
             # Rescale the column by the CPI value
+            # If the value is negative, don't rescale it (to preserve error codes)
             new_data[column] = new_data.apply(
-                lambda row: row[column] * (CPI_values.get(row['year'], 1) / CPI_values.get(1979, 1)),
+                lambda row: row[column] * (CPI_values.get(1979, 1) / CPI_values.get(row['year'], 1)) if  row[column] >= 0 else row[column],
                 axis=1
             )
 
