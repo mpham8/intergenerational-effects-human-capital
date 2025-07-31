@@ -28,7 +28,7 @@ local raw_data_folder = "Raw_Data"
 // REPLACE ABOVE WITH YOUR FILEPATH
 
 local cnls_filepath = "07-08-25-child" // if downloaded data from NLS: replace with your data name
-local nls79_filepath = "07-22-mother-data"
+local nls79_filepath = "07-22-mother-data" // if downloaded data from NLS: replace with your data name
 local rename_variable_labels_filepath = "Initial_Preprocessing/Rename_Names_To_Labels.do" // ALSO REPLACE
 local cnls_save_filepath = "07-08-25-renamed.csv"
 local nls79_save_filepath = "07-22-25-mother-renamed.csv"
@@ -45,20 +45,20 @@ clear all
 cd $global_dir
 
 
-* * FOR CNLSY79 DATA
-//
-// infile using "`cnls_dct_filepath'"
-//
-// * * FOR CNLS DATA
-// * Renaming to question codes using code copied from the value-labels.do file
-// do "`cnls_rename_qcodes_filepath'"
-// * Renaming to final version (modified variable labels) using custom code
-// do "`rename_variable_labels_filepath'"
-// * Save file as a csv
-// export delimited "`cnls_save_filepath'"
+* * FOR CNLSY79 (NLSCYA) DATA
+
+infile using "`cnls_dct_filepath'"
+
+* * FOR CNLS DATA
+* Renaming to question codes using code copied from the value-labels.do file
+do "`cnls_rename_qcodes_filepath'"
+* Renaming to final version (modified variable labels) using custom code
+do "`rename_variable_labels_filepath'"
+* Save file as a csv
+export delimited "`cnls_save_filepath'"
 
 
-* * FOR NLS79 DATA
+* * FOR NLSY79 DATA
 
 clear all
 infile using "`nls79_dct_filepath'"

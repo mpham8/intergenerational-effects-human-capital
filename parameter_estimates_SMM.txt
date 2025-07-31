@@ -1,0 +1,7 @@
+Parameters to optimize:
+Delta: 20
+Rho_val: -0.2
+Rho_e_val: -0.2
+theta_1: 0.3
+theta_2: 0.2
+theta_3: 0.2

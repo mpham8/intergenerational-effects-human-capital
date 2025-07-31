@@ -1,7 +1,7 @@
 #!/bin/python3
 """
 Bijan Taheri (O'Connell Lab)
-June 2025
+Summer 2025
 
 This code is designed to implement something similar to Del Boca's method of simulated moments to estimate the model parameters
 
@@ -22,10 +22,8 @@ sbatch --test-only myscript.sh
 salloc -t 60 --cpus-per-task=1 --mem-per-cpu=32gb --partition=unowned
 
 
-Don't use base environment, create 
-Questions: 
-- 
-- 
+Don't use base environment, create conda env
+
 """
 
 # Imports
@@ -57,7 +55,7 @@ NUM_PERIODS = 4
 NUM_MOMENTS = 24
 LATENT_FACTOR_FILEPATH = os.path.dirname(os.path.abspath(__file__)) + "/Attanasio Replication/6-26_estimation_results.xlsx"
 PARAM_OUTPUT_FILEPATH = "parameter_estimates_SMM.txt"
-METHOD_OPTIMIZATION = 'Nelder-Mead'
+METHOD_OPTIMIZATION = 'L-BFGS-B'
 
 # Household-generation
 MU_WAGE_RATE_GROWTH = 0.07
@@ -76,7 +74,6 @@ PARAMETER_NAMES = [
     "theta_1", 
     "theta_2", 
     "theta_3", 
-    "theta_4", 
 ]
 # Step sizes for grid search
 STEP_SIZES = {
@@ -92,13 +89,13 @@ STEP_SIZES = {
 parameters = [
     12,  # Delta parameter
     -0.3, # rho
-    -0.2, # rho_e
+    -0.1, # rho_e
     0.35, # theta_1
     0.15, # theta_2
     0.25, # theta_3
 # TODO: check if this is wrong (shouldn't I have different thetas over time?)
 ]
-parameters_to_optimize = [12, -0.3,-0.2,0.35, 0.15, 0.25]
+parameters_to_optimize = [20, -0.2,-0.2,0.3, 0.2, 0.2]
 # Ranges for parameters
 # rho (and rho_e): -5 to 0.5
 # thetas: 0 to 1
@@ -276,8 +273,8 @@ def two_step_smm(empirical: np.ndarray, initial_guess, households: np.ndarray, t
         print("\nInitial guesses for parameters:")
         print(res1.x)
         theta_1 = res1.x
-        sims = np.ndarray((100, NUM_MOMENTS))
-        for i in range(100): 
+        sims = np.ndarray((20, NUM_MOMENTS))
+        for i in range(20): 
             households = create_households(NUMBER_OF_HOUSEHOLDS)
             sims[i] = simulate_moments(theta_1, households, num_workers)
         print("Computing more optimal weighting matrix...")
@@ -573,7 +570,7 @@ def main():
     # TODO: replace following code with commented line below it
     
     households_empirical = create_households(NUMBER_OF_HOUSEHOLDS)
-    empirical = np.average([simulate_moments(parameters_to_optimize, households_empirical) for _ in range(100)], axis=0) # Placeholder
+    empirical = np.average([simulate_moments(parameters_to_optimize, households_empirical) for _ in range(2)], axis=0) # Placeholder
     print("Here are our empirical moments: ")
     print(empirical)
 
@@ -594,6 +591,7 @@ def main():
 
     # Writing the parameter estimates to a file
     with open(PARAM_OUTPUT_FILEPATH, "w") as f:
+        f.write("\n\n")
         f.write("Parameter estimates from Simulated Method of Moments\n")
         for i in range(len(PARAMETER_NAMES)): 
             f.write(f"{PARAMETER_NAMES[i]}: {param_test[i]}\n")

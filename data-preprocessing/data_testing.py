@@ -1,15 +1,25 @@
+"""
+Bijan Taheri (O'Connell Lab, Swarthmore College)
+Summer 2025
+
+This file is used to look into data anomalies, test data availability, and visualize the data.
+"""
+
+
+
 import numpy as np
 import pandas as pd
-from RD_Cleaning_Data_Code import nls_file_path, age_periods
+from RD_Cleaning_Data_Code import nls_child_file_path, age_periods
 import matplotlib.pyplot as plt
 from important_dictionary_variables import categories_of_variables
 import seaborn as sns
+from typing import List, Dict, Tuple, Any
 
 data_testing_folder = "data-preprocessing/Initial_Preprocessing/data-testing/"
 try:
-    nls_data = pd.read_csv(nls_file_path)
+    nls_data = pd.read_csv(nls_child_file_path)
 except FileNotFoundError:
-    print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+    print(f"Error: The file {nls_child_file_path} was not found. Please check the file path.")
     raise
 nls_data = pd.DataFrame(nls_data)
 
@@ -268,7 +278,8 @@ def plot_data_points_by_period(data, time_col='period'):
     plt.ylabel('Number of Data Points')
     plt.tight_layout()
     plt.show()
-# 
+
+
 # plot_data_points_by_period(period_data_no_filled_edges, time_col='period')
 # plot_variable_over_time(age_data[age_data > 0], "PIAT_MATH", time_col='age')
 # plot_variable_over_time(age_data[age_data > 0], "PPVT", time_col='age')
@@ -278,13 +289,13 @@ def plot_data_points_by_period(data, time_col='period'):
 # sns.displot(period_data.loc[period_data["TRANSFER_INCOME"] > 0, "TRANSFER_INCOME"])
 # plt.show()
 
-print(age_data.loc[(age_data["SSI_TOTAL"] > 30000) & (age_data["year"] == 2014), ['id', 'age', 'year', 'MPUBID_XRND', 'SSI_TOTAL', 'WELFARE_AMT', 'TRANSFER_INCOME']].sort_values('year'))
-print(age_data.loc[(age_data["AFDC_TOTAL"] > 75000) & (age_data["year"] == 1988), ['id', 'age', 'year', 'MPUBID_XRND', 'AFDC_TOTAL', 'WELFARE_AMT', 'TRANSFER_INCOME']].sort_values('year'))
-print(age_data.loc[(age_data["TRANSFER_INCOME"] > 200000), ['id', 'age', 'year', 'MPUBID_XRND', 'SSI_TOTAL', 'AFDC_TOTAL', 'FDSTMPS_TOTAL', 'WELFARE_AMT', 'UNEMPR_TOTAL', 'UNEMPSP_TOTAL', 'TRANSFER_INCOME']].sort_values('year'))
+# print(age_data.loc[(age_data["SSI_TOTAL"] > 30000) & (age_data["year"] == 2014), ['id', 'age', 'year', 'MPUBID_XRND', 'SSI_TOTAL', 'WELFARE_AMT', 'TRANSFER_INCOME']].sort_values('year'))
+# print(age_data.loc[(age_data["AFDC_TOTAL"] > 75000) & (age_data["year"] == 1988), ['id', 'age', 'year', 'MPUBID_XRND', 'AFDC_TOTAL', 'WELFARE_AMT', 'TRANSFER_INCOME']].sort_values('year'))
+# print(age_data.loc[(age_data["TRANSFER_INCOME"] > 200000), ['id', 'age', 'year', 'MPUBID_XRND', 'SSI_TOTAL', 'AFDC_TOTAL', 'FDSTMPS_TOTAL', 'WELFARE_AMT', 'UNEMPR_TOTAL', 'UNEMPSP_TOTAL', 'TRANSFER_INCOME']].sort_values('year'))
 
-print(age_data.loc[(age_data['SSI_TOTAL'] < age_data['SSDI_TOTAL']) & (age_data['SSI_TOTAL'] > 0), ['id', 'age', 'year', 'MPUBID_XRND', 'SSI_TOTAL', 'SSDI_TOTAL', 'WELFARE_AMT', 'TRANSFER_INCOME']])
-print(age_data.loc[(age_data["SSI_TOTAL"] > 75000) & (age_data["year"] == 2014), 'MPUBID_XRND'].unique())
-print(age_data.loc[(age_data["AFDC_TOTAL"] > 75000) & (age_data["year"] == 1988), 'MPUBID_XRND'].unique())
+# print(age_data.loc[(age_data['SSI_TOTAL'] < age_data['SSDI_TOTAL']) & (age_data['SSI_TOTAL'] > 0), ['id', 'age', 'year', 'MPUBID_XRND', 'SSI_TOTAL', 'SSDI_TOTAL', 'WELFARE_AMT', 'TRANSFER_INCOME']])
+# print(age_data.loc[(age_data["SSI_TOTAL"] > 75000) & (age_data["year"] == 2014), 'MPUBID_XRND'].unique())
+# print(age_data.loc[(age_data["AFDC_TOTAL"] > 75000) & (age_data["year"] == 1988), 'MPUBID_XRND'].unique())
 # TODO: figure out number of siblings that may be missing from the data
 num_missing_siblings = 0
 missing_siblings = [] # List to store IDs of children with missing siblings

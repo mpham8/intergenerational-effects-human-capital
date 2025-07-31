@@ -4,7 +4,7 @@ June 2025
 Pytohn 3.13
 
 
-This code is meant to clean the data collected from the NLSY79 survey. It is meant to run in the base directory of the project. 
+This code is meant to clean the data collected from the NLSY79 and NLSCYA (a.k.a. CNLSY) surveys. It is meant to run in the base directory of the project. 
 
 This code creates a child-by-period panel, where each data point represents a variable for a child in a specific period. Each period corresponds to an age range of the child. The periods are as follows: 
 Period -1: age -1 (label: pre-birth)
@@ -13,13 +13,12 @@ Period 1: age 6-9 (label: elementary)
 Period 2: age 10-14 (label: secondary)
 Period 3: age 15-19 (label: high school)
 
-The code performs the following tasks:
+The code (broadly) performs the following tasks:
 0. Delete any existing output files to avoid confusion (make sure to respond to the input!)
-1. Load the data (for the file path, leave it as a variable to be specified later)
-2. Create a child by age panel, with the child ID and the age of the child with the CNLSY79 data
-3. Combine this data with the data from the NLSY79 (which surveys the mother)
-4. Create the child by period table by taking the middle value for each period (for example, age 12 for Period 2), and linearly interpolating between the different values in each period when applicable (for example, interpolating between math scores at ages 7 and 8 to find the best estimate for Period 1 (age 6-9). 
-5. Save the cleaned data to a new .csv file
+1. Load the data
+2. Create a child by age panel, with the child ID and the age of the child with the CNLSY79 data, combining this data with the data from the NLSY79 (which surveys the mother)
+3. Create the child by period table by taking the middle value for each period (for example, age 12 for Period 2), and linearly interpolating between the different values in each period when applicable (for example, interpolating between math scores at ages 7 and 8 to find the best estimate for Period 1 (age 6-9). 
+4. Save the cleaned data to a new .csv file
 
 Dependencies:
 - pandas
@@ -28,7 +27,7 @@ Dependencies:
 - scipy (for pandas under-the-hood interpolation)
 - openpyxl (for pandas under-the-hood opening excel files)
 
-Note: make sure the "categories_of_variables" file is hosted within the same directory as this file
+Note: make sure the "important_dictionary_variables" file is hosted within the same directory as this file
 
 """
 
@@ -44,37 +43,38 @@ from important_dictionary_variables import categories_of_variables, variable_age
 
 
 
-
-
 # File paths
 
 # File path ending (it's the same across all output paths)
 PATH_ENDING = "BEST"
 # Input files
-nls_file_path = 'data-preprocessing/Initial_Preprocessing/07-08-25-renamed.csv'  # Update this path as needed
-mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/07-22-25-mother-renamed.csv'  # File containing mother data, update this path as needed
-CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx'
+nls_child_file_path = 'data-preprocessing/Initial_Preprocessing/07-08-25-renamed.csv'  # File containing NLSCYA (child) data, update this path as needed
+mother_data_file_path = 'data-preprocessing/Initial_Preprocessing/07-22-25-mother-renamed.csv'  # File containing NLSY79 (mother) data, update this path as needed
+CPI_file_path = 'data-preprocessing/Initial_Preprocessing/historical-cpi-u-202505.xlsx' # File containing CPI data, update this path as needed
 
 # Output files
 nan_file_path = f'data-preprocessing/Processed_Data/nan_columns_{PATH_ENDING}.csv'  # File to save columns with NaN values for further investigation
-age_output_file_path = f'data-preprocessing/Processed_Data/child_age_panel_{PATH_ENDING}.csv'
-period_output_file_path = f'data-preprocessing/Processed_Data/child_period_panel_{PATH_ENDING}.csv'  # File to save the child by period data
-period_wide_output_file_path = f'data-preprocessing/Processed_Data/child_period_panel_wide_{PATH_ENDING}.csv'  # File to save the wide format of the child by period data
+age_output_file_path = f'data-preprocessing/Processed_Data/child_age_panel_{PATH_ENDING}.csv' # File to save child-age panel data
+period_output_file_path = f'data-preprocessing/Processed_Data/child_period_panel_{PATH_ENDING}.csv'  # File to save the child-period panel (long) data
+period_wide_output_file_path = f'data-preprocessing/Processed_Data/child_period_panel_wide_{PATH_ENDING}.csv'  # File to save the child-period panel (wide) data
 
 
 # Defining terms for processing
-SHORTEN_DATA = False
-NUMBER_OF_ROWS_TESTING = 500
+SHORTEN_DATA = False # NOTE: only edit this line of code if you are looking to run a quick test of the file. With the full dataset it takes around 5-10 minutes, but with a shortened dataset, it can take less than a minute
+NUMBER_OF_ROWS_TESTING = 500 # only relevant if shortening the data for testing purposes
 PREBIRTH_AGES_PER_CHILD = 2 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
-
+OUTLIER_THRESHOLD = 3 # the number of standard deviations outside of which we throw away the data. Enter "None" to have no threshold
 
 # Defining terms for rescaling data
+# The following terms appear in multiple-choice questions for the NLSY79 data. These numbers represent subjective quantitative estimates for those terms
 SEVERAL_TIMES_PER_YEAR = 7
 SEVERAL_TIMES_PER_MONTH = 5
 SEVERAL_TIMES_PER_WEEK = 4
 MORE_THAN_ONCE_PER_DAY = 2
-WEEKS_PER_MONTH = 4.345
+# The following term is used to rescale month-scaled answers to week-scaled answers
+WEEKS_PER_MONTH = 4.345 
 
+# The columns that need to be adjusted for inflation (i.e., all the columns involving USD)
 INFLATION_ADJUSTED_COLUMNS = [
     "TNFI_TRUNC", 
     "TOTAL_FAMILY_INCOME_FR_ALL",
@@ -87,17 +87,18 @@ INFLATION_ADJUSTED_COLUMNS = [
     'FDSTMPS_TOTAL', 
     'SSI_TOTAL', 
     'WELFARE_AMT', 
+    'SSDI_TOTAL',
 ]
 
 
 
-# Age periods dictionary
+# Age periods dictionary (edit if changing the age periods)
 age_periods = {
-    -1: (-1, -1), # Pre-birth
+    -1: (-1, -1), # Pre-birth (not an actual period, just used to derive parental characteristics before birth)
     0: (0, 5), # Pre-elementary
     1: (6, 9), # Elementary
     2: (10, 14), # Secondary
-    3: (15, 19) # High school
+    3: (15, 19) # High school (NOTE: the max age of 19 is hard-coded, so if you want to change this, you'll need to change it throughout)
 }
 
 columns_to_drop = {
@@ -138,7 +139,7 @@ column_suffixes_to_remove = [
     '_REVISED_XRND', 
 ]
 
-# Dictionary to map poorly-named columns to their intended names (basically, handling exceptions in the CLNS79 data)
+# Dictionary to map poorly-named columns to their intended names (basically, handling exceptions in both the CNLSY and NLSY79 data)
 poorly_named_columns = {
     'MOM_HELPS_CH_LE': 'MOM_HELPS_CH_LEARN_NUMBERS',
     'MOM_HELPS_CH_LEA': 'MOM_HELPS_CH_LEARN_NUMBERS',
@@ -152,7 +153,6 @@ poorly_named_columns = {
     'SCHOOL_CHILD_ATTENDS': 'TYPE_OF_SCHOOL',
     'TYPE_OF_SCHOOL_94': 'TYPE_OF_SCHOOL',
     'TYPE_OF_SCHOOL_96': 'TYPE_OF_SCHOOL',
-    # NOTE: confused, what's the difference between "C" and "Y"
     'TYPE_OF_SCHOOL_CHILD_ATT' : 'TYPE_OF_SCHOOL',
     'TYPE_OF_SCH_CHD_ATTNDS_C' : 'TYPE_OF_SCHOOL',
     'TYPE_OF_SCHOOL_CHILD_ATTEND' : 'TYPE_OF_SCHOOL',
@@ -222,9 +222,9 @@ poorly_named_columns = {
     'Q1_3_A_Y' : 'MOTHER_BIRTH_YEAR',
 
     
-    # NOTE: combine Q2_15A and Q2_15A_PRE?
 }
 
+# Renaming columns to more descriptive names (after aggregation)
 better_named_columns = {
     'HOW_OFT_CH_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_MUSEUM', 
     'HOW_OFT_TAKEN' : 'HOW_OFT_CH_TAKEN_TO_PERFORMANCE',
@@ -243,13 +243,14 @@ better_named_columns = {
     'PIAT_READ_REC_TOTAL_RAW_SCO' : 'PIAT_READ_REC', 
     'PIAT_READ_COMP_TOTAL_RAW_SC' : 'PIAT_READ_COMP', 
     'PPVT_TOTAL_RAW_SCORE' : 'PPVT', 
-    'HIGHEST_GRADE_OF_REGULAR_SC' : 'HGC_YEARLY_CHILD', # NOTE: does this column need to be processed differently? It's the only column in "Educational Attainment" that's not XRND (i.e., across the whole file)
+    'HIGHEST_GRADE_OF_REGULAR_SC' : 'HGC_YEARLY_CHILD', 
     'Q13_5' : 'LABOR_INCOME', 
     'HGC_EVER_XRND' : 'HGC_EVER_MOM_XRND', 
     'HIGHEST_DEGREE_EVER_XRND' : 'HIGHEST_DEGREE_EVER_MOM_XRND',
 }
 
-# If over time, all variables will be rescaled to per week (easiest to do)
+# Rescaling variables from multiple-choice questions to a common scale
+# If over time, all variables will, as a default, be rescaled to per week (easiest to do)
 rescaling_variables = {
     'HOW_OFTEN_MOM_READS' : [0, SEVERAL_TIMES_PER_YEAR/52, SEVERAL_TIMES_PER_MONTH/WEEKS_PER_MONTH, 1, 3, 7], 
     'HOW_OFT_CH_EATS_W' : [MORE_THAN_ONCE_PER_DAY*7, 7, SEVERAL_TIMES_PER_WEEK, 1, 1/WEEKS_PER_MONTH, 0], 
@@ -257,7 +258,6 @@ rescaling_variables = {
     'HOW_OFT_CH_TAKEN_TO_PERFORMANCE' : [0, 1.5/52, SEVERAL_TIMES_PER_YEAR/52, 1/WEEKS_PER_MONTH, 1],
     'HOW_OFT_CH_W_DAD' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan], 
     'HOW_OFT_CH_W_DAD_OUTDOORS' : [7, 4, 1, 1/WEEKS_PER_MONTH, 3/52, np.nan],
-    'DO_PARS_DISCUSS_TV' : [0, 1, np.nan], 
     'PARS_HELP_W_HOMEWORK' : [0.5/WEEKS_PER_MONTH, 1.5/WEEKS_PER_MONTH, 1.5, 5, 7, np.nan], 
     # This variable below will be rescaled to months
     'HOW_LONG_CHILD_WAS_IN_HEAD': [(0+3)/2, (3+11)/2, (12+23)/2, 24, np.nan], # NOTE: need help with rescaling
@@ -274,7 +274,7 @@ rescaling_variables = {
 }
 
 # List of variables to rescale that are edge cases (the variable scales differ with age)
-# Each entry is [variable name, age range, set of new values]
+# Each entry is (variable name, age range, set of new values)
 rescaling_variables_by_age = [
     ('HOW_MANY_BOOKS', (0, 9), [0, 1.5, 6, 10]),
     ('HOW_MANY_BOOKS', (10, 14), [0, 5, 15, 20])
@@ -285,7 +285,7 @@ rescaling_variables_by_age = [
 
 # FUNCTIONS
 
-# Function to create the child by age panel from a dataframe
+# Function to create the child by age panel from a dataframe (does NOT include interpolation)
 
 def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     """
@@ -429,7 +429,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     try:
         mother_data = pd.read_csv(mother_data_file_path)
     except FileNotFoundError:
-        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+        print(f"Error: The file {nls_child_file_path} was not found. Please check the file path.")
         raise
 
     mother_data = pd.DataFrame(mother_data)
@@ -547,6 +547,18 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             mother_map = dict(zip(mother_id, mother_col))
             # Fill in the value for all ages for each child
             new_data[column_name] = new_data['MPUBID_XRND'].map(mother_map)
+    
+
+    # Removing all outliers from the current data
+    if OUTLIER_THRESHOLD is not None: 
+        print("Removing outliers from the data...")
+        columns_to_check = [col for col in new_data.columns if col not in ['id', 'age', 'year', 'MOM_HELPS_CH_LEARN_NUMBERS', 'MOM_HELPS_CH_LEARN_ALPHABET', 'MOM_HELPS_CH_LEARN_COLORS', 'MOM_HELPS_CH_LEARN_SHAPES']]
+        new_data = remove_outliers(new_data, columns_to_check, threshold=OUTLIER_THRESHOLD)
+
+        print("Outliers removed. Here is the new data:")
+        print(new_data.head())
+    else: 
+        print("Skipping removal of outliers")
 
     # Adding "Number of Older Siblings" and "Number of Children" columns using child IDs and mother IDs
     for child_id in nls_data['id'].unique(): 
@@ -573,8 +585,12 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     
     # Adding transfer income column (aggregation of all transfer income columns)
     transfer_income_columns = ['UNEMPR_TOTAL', 'UNEMPSP_TOTAL', 'AFDC_TOTAL', 'FDSTMPS_TOTAL', 'SSI_TOTAL', 'SSDI_TOTAL']
-    # Aggregate the transfer income columns by summing them up, treating NaN values as 0
-    new_data['TRANSFER_INCOME'] = new_data[transfer_income_columns].fillna(0).sum(axis=1)
+    # Aggregate the transfer income columns by summing them up, treating NaN values and negative values as 0
+    # However, if all values are negative, then we will keep the negative value
+    # This is to ensure that we don't lose the negative values that indicate a transfer income
+    new_data['TRANSFER_INCOME'] = new_data[transfer_income_columns].apply(
+        lambda row: row.fillna(0).sum() if (row >= 0).any() else row.min(), axis=1
+    )
 
 
 
@@ -635,8 +651,6 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
 
 # Function to create the child by period table from the child by age panel
-
-
 def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     """
     Creates a child-by-period table from a child-by-age panel.
@@ -730,7 +744,7 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     period_data = period_data.sort_values(['id', 'period']).reset_index(drop=True)
     return period_data
 
-
+# Function to transform the period data from a long to wide format
 def transform_period_data(age_panel: pd.DataFrame, period_panel: pd.DataFrame) -> pd.DataFrame:
     """ 
     Transforms the period data from long to wide format using both the child-age panel and the child-period panel.
@@ -815,17 +829,44 @@ def transform_period_data(age_panel: pd.DataFrame, period_panel: pd.DataFrame) -
     final = result.merge(wide_part, on=id_col, how='left')
     return final
 
+
+# Writing a function to remove outliers from a DataFrame based on specified columns and a threshold
+def remove_outliers(df: pd.DataFrame, columns: list, threshold: float = 3.0) -> pd.DataFrame:
+    """
+    Removes outliers (i.e., replaces them with "NaN") from the DataFrame based on the specified columns and threshold.
+    Outliers are defined as values that are more than 'threshold' standard deviations away from the mean.
+    
+    Parameters:
+        df (pd.DataFrame): The input DataFrame.
+        columns (list): List of column names to check for outliers.
+        threshold (float): The number of standard deviations to use as the threshold for outliers.
+        
+    Returns:
+        pd.DataFrame: The DataFrame with outliers removed.
+    """
+    df = df.copy()
+    for column in columns:
+        if column not in df.columns:
+            print(f"Warning: Column '{column}' not found in DataFrame. Skipping outlier removal for this column.")
+            continue
+        mean = df[column].mean()
+        std_dev = df[column].std()
+        # Define the upper and lower bounds for outliers
+        upper_bound = mean + threshold * std_dev
+        lower_bound = mean - threshold * std_dev
+        # Replace outliers with NaN
+        df[column] = df[column].where((df[column] <= upper_bound) & (df[column] >= lower_bound), np.nan)
+    return df
+
+
+# Function to get CPI values from the BLS CPI data (aggregating over months)
 def get_CPI_values(CPI_file_path: str) -> np.ndarray:
     CPI_data = pd.read_excel(CPI_file_path, header=3)
     CPI_data['yearly_data'] = CPI_data.iloc[:, 2:].sum(axis=1, numeric_only=True)
     return dict(zip(CPI_data['Year'].values, CPI_data['yearly_data']))
 
-
+# Function to get the age range of a variable in the data
 def get_age_range(df: pd.DataFrame, column: str) -> tuple:
-    """
-    Returns the (min_age, max_age) for which the specified column has non-NaN and non-negative values in the child-age panel.
-    If all values are NaN or negative, returns (None, None).
-    """
     valid_ages = df.loc[df[column].notna() & (df[column] >= 0), 'age']
     if valid_ages.empty:
         return (None, None)
@@ -870,9 +911,9 @@ def main():
 
     # 1. Loading the data
     try:
-        nls_data = pd.read_csv(nls_file_path)
+        nls_data = pd.read_csv(nls_child_file_path)
     except FileNotFoundError:
-        print(f"Error: The file {nls_file_path} was not found. Please check the file path.")
+        print(f"Error: The file {nls_child_file_path} was not found. Please check the file path.")
         raise
     nls_data = pd.DataFrame(nls_data)
     # Display the first few rows of the data to understand its structure
@@ -938,7 +979,7 @@ def main():
 
 
     # Create a file to store the age ranges for the variables
-    with open(f"data-preprocessing/Initial_Preprocessing/variable_ages.txt", "w") as f:
+    with open(f"data-preprocessing/Initial_Preprocessing/variable_age_automated.txt", "w") as f:
         f.write("variable_ages = { \n")
         for column in new_data.columns: 
             min_age, max_age = get_age_range(new_data, column)
@@ -946,10 +987,10 @@ def main():
 
         f.write("}")
 
+   
 
 
     # 2b. Interpolating the data to fill missing values
-    # --- Interpolation and Filling Missing Values for Ages 0–19 ---
 
     print("Interpolating data...")
     # Separate pre-birth (age -1) data from post-birth (age 0-19) data for later recombination
@@ -970,6 +1011,7 @@ def main():
     # Fixing any incorrectly inputted data
     # For ages 3-5 variables, if max_age + 1 is filled, shift all values down by one (so 4 -> 3, 6 -> 5, etc.)
     # For all other variables, just use the interpolated value (done after interpolation)
+    # If you want to treat age 3-5 variables the same as other variables, comment out the below chunk of code
     for col in age_panel.columns:
         if col in ['id', 'age']: 
             continue
@@ -1057,18 +1099,6 @@ def main():
         if (not new_data_interpolated.loc[new_data_interpolated[col] < 0, col].empty) and (col != 'age'): 
             print(f"Column {col} contains negative values from interpolation!")
 
-    # Create a graph to show how interpolation is giving negative values
-    # import matplotlib.pyplot as plt
-
-    # column_to_examine = 'PIAT_MATH'
-    # child_to_examine = new_data_interpolated.loc[new_data_interpolated[column_to_examine] < 0, 'id'].values[0]
-    # x = new_data_interpolated.loc[new_data_interpolated['id'] == child_to_examine]['year'].values
-    # y = new_data_interpolated.loc[new_data_interpolated['id'] == child_to_examine][column_to_examine].values
-    # actual_points = new_data.loc[new_data['id'] == child_to_examine][column_to_examine].values
-    # plt.plot(x, y)
-    # plt.scatter(x, actual_points)
-    # plt.show()
-
     
 
 
@@ -1079,7 +1109,7 @@ def main():
     period_data = aggregate_period_data(new_data_interpolated, age_periods)
 
 
-    # Dropping bad columns
+    # Dropping "bad" columns (i.e., columns that were added to the data but will not be kept in future steps)
     period_data = period_data.drop(columns=columns_to_drop)
 
     
@@ -1132,30 +1162,6 @@ def main():
 
     else:
         print("No columns with all NaN values found in the period_data DataFrame.")
-
-    
-
-    # Checking for "bad" columns
-
-    # Count the number of full rows gained from dropping each column
-    # gain_from_column_drop = {}
-    # initial_full_rows = period_data.copy().dropna(inplace=False).shape[0]
-    # print(f"Initial full rows: {initial_full_rows}")
-    # # Exclude 'id' and 'period' columns from the loop
-    # columns_to_check = [col for col in period_data.columns if col not in ['id', 'period']]
-    # for col in columns_to_check:
-    #     dropped = period_data.copy().drop(columns=[col])
-    #     full_rows = dropped.dropna().shape[0]
-    #     gain_from_column_drop[col] = full_rows - initial_full_rows
-    # print("Rows gained from dropping each column (full rows only):")
-    # results = []
-    # for col, gain in gain_from_column_drop.items():
-    #     results.append(f"{col}: {gain}")
-    # print("\n".join(results))
-    
-
-    
-
 
 
 
@@ -1222,9 +1228,8 @@ def main():
                 period_data_wide_stats.at[column, "Category"] = category
                 period_data_wide_stats.at[column, "Description"] = variable_descriptions.get(column, "No description available")
 
-    # Group by Description, with "Other" category at the top
+    # Group descriptive stats by category, with "Other" category at the top
     grouped_stats = period_data_wide_stats.copy()
-    # Add a helper column for sorting: "Other" first, then alphabetical
     grouped_stats["_sort_key"] = grouped_stats["Category"].apply(lambda x: "0" if x == "Other" else f"1_{x}")
     grouped_stats = grouped_stats.sort_values("_sort_key").drop(columns="_sort_key")
     grouped_stats.to_csv(f"{os.path.splitext(period_wide_output_file_path)[0]}_Descriptive_Stats.csv", mode='w')
@@ -1237,12 +1242,18 @@ def main():
         f.write(f"SHORTEN_DATA: {SHORTEN_DATA} \n")
         f.write(f"NUMBER_OF_ROWS_TESTING: {NUMBER_OF_ROWS_TESTING} \n")
         f.write(f"PREBIRTH_AGES_PER_CHILD: {PREBIRTH_AGES_PER_CHILD} \n")
+        f.write(f"OUTLIER_THRESHOLD: {OUTLIER_THRESHOLD} \n")
         f.write("\n\n")
         f.write(f"SEVERAL_TIMES_PER_YEAR: {SEVERAL_TIMES_PER_YEAR} \n")
         f.write(f"SEVERAL_TIMES_PER_MONTH: {SEVERAL_TIMES_PER_MONTH} \n")
+        f.write(f"SEVERAL_TIMES_PER_WEEK: {SEVERAL_TIMES_PER_WEEK} \n")
         f.write(f"MORE_THAN_ONCE_PER_DAY: {MORE_THAN_ONCE_PER_DAY} \n")
         f.write(f"WEEKS_PER_MONTH: {WEEKS_PER_MONTH} \n")
         f.write("\n\n")
+        f.write("INFLATION_ADJUSTED_COLUMNS: [ \n")
+        for column in INFLATION_ADJUSTED_COLUMNS:
+            f.write(f"{column} \n")
+        f.write("] \n\n")
         f.write("age_periods: {\n")
         for key, value in age_periods.items():
             f.write(f"{key}: {value}\n")
