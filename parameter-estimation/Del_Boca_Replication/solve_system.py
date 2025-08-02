@@ -19,7 +19,7 @@ eps1, eps2, eps3, eps4 = 1, 1, 1, 1 # Parental productivity
 G1, G2, G3, G4         = 1, 1, 1, 1 # Public education productivity
 
 def solve_household(parameters, household): 
-    c1, e1, l1, h2, predh5final = solve_bounded_system_t1(parameters, household)
+    c1, e1, l1, h2, _ = solve_bounded_system_t1(parameters, household)
     c2, e2, l2, h3 = solve_bounded_system_t2(parameters, household, h2)
     c3, e3, l3, h4 = solve_bounded_system_t3(parameters, household, h3)
     c4, e4, l4, h5 = solve_bounded_system_t4(parameters, household, h4)
@@ -216,7 +216,9 @@ def solve_bounded_system_t1(parameters, household):
                 continue
         
         sol = best_sol
-    
+    if sol == None: 
+        print("No solution found with any approach. Returning NaN values.")
+        return np.nan, np.nan, np.nan, np.nan, np.nan
     if sol.success:
         # print("\nSuccess!")
         # print("Solution l1,l2,l3,l4 =", sol.x)
@@ -282,7 +284,9 @@ def solve_bounded_system_t2(parameters, household, h2):
     h1_rho = 1.0
 
 
-
+    if h2 == np.nan: 
+        # This means that solve_bounded_system_t1 failed to find a solution, so we'll return NaN values
+        return np.nan, np.nan, np.nan, np.nan
 
     def c_t_star(lt, wt):
         return ((1.0 - lt) * wt * h) / gamma_
@@ -481,7 +485,9 @@ def solve_bounded_system_t2(parameters, household, h2):
                 continue
         
         sol = best_sol
-    
+    if sol == None: 
+        print("No solution found with any approach. Returning NaN values.")
+        return np.nan, np.nan, np.nan, np.nan
     if sol.success:
         # print("\nSuccess!")
         # print("Solution l2,l3,l4 =", sol.x)
@@ -543,6 +549,10 @@ def solve_bounded_system_t3(parameters, household, h3):
 
     # If h1^rho is a constant
     h1_rho = 1.0
+
+    if h3 == np.nan:
+        # This means that solve_bounded_system_t2 failed to find a solution, so we'll return NaN values
+        return np.nan, np.nan, np.nan, np.nan
 
     def c_t_star(lt, wt):
         return ((1.0 - lt) * wt * h) / gamma_
@@ -741,7 +751,9 @@ def solve_bounded_system_t3(parameters, household, h3):
                 continue
         
         sol = best_sol
-    
+    if sol == None:
+        print("No solution found with any approach. Returning NaN values.")
+        return np.nan, np.nan, np.nan, np.nan
     if sol.success:
         # print("\nSuccess!")
         # print("Solution l3,l4 =", sol.x)
@@ -800,6 +812,10 @@ def solve_bounded_system_t4(parameters, household, h4):
 
     # If h1^rho is a constant
     h1_rho = 1.0
+
+    if h4 == np.nan:
+        # This means that solve_bounded_system_t3 failed to find a solution, so we'll return NaN values
+        return np.nan, np.nan, np.nan, np.nan
 
     def c_t_star(lt, wt):
         return ((1.0 - lt) * wt * h) / gamma_
@@ -998,6 +1014,9 @@ def solve_bounded_system_t4(parameters, household, h4):
         
         sol = best_sol
     
+    if sol == None:
+        print("No solution found with any approach. Returning NaN values.")
+        return np.nan, np.nan, np.nan, np.nan
     if sol.success:
         # print("\nSuccess!")
         # print("Solution l4 =", sol.x)
@@ -1041,63 +1060,63 @@ def solve_bounded_system_t4(parameters, household, h4):
     c4star = c_t_star(sol.x[0], w4)
     return c4star, e4star, sol.x[0], h_5(e4star)
 
-if __name__ == "__main__":
-    # Run all simulations and save results
+# if __name__ == "__main__":
+#     # Run all simulations and save results
 
-    # Create a function to run the simulation with different parameters
-    def run_simulation(rho_val, rho_e_val):
-        try:
-            h_val = 0.7
-            c1, e1, l1, h2, predh5final = solve_bounded_system_t1(rho_val, rho_e_val, h_val)
-            c2, e2, l2, h3 = solve_bounded_system_t2(rho_val, rho_e_val, h2, h_val)
-            c3, e3, l3, h4 = solve_bounded_system_t3(rho_val, rho_e_val, h3, h_val)
-            c4, e4, l4, h5 = solve_bounded_system_t4(rho_val, rho_e_val, h4, h_val)
+#     # Create a function to run the simulation with different parameters
+#     def run_simulation(rho_val, rho_e_val):
+#         try:
+#             h_val = 0.7
+#             c1, e1, l1, h2, predh5final = solve_bounded_system_t1(rho_val, rho_e_val, h_val)
+#             c2, e2, l2, h3 = solve_bounded_system_t2(rho_val, rho_e_val, h2, h_val)
+#             c3, e3, l3, h4 = solve_bounded_system_t3(rho_val, rho_e_val, h3, h_val)
+#             c4, e4, l4, h5 = solve_bounded_system_t4(rho_val, rho_e_val, h4, h_val)
             
-            return {
-                'rho': rho_val,
-                'rho_e': rho_e_val,
-                'predh5final': predh5final,
-                'h5': h5
-            }
-        except Exception as e:
-            print(f"Error with rho={rho_val}, rho_e={rho_e_val}: {str(e)}")
-            return {
-                'rho': rho_val,
-                'rho_e': rho_e_val,
-                'predh5final': np.nan,
-                'h5': np.nan
-            }
+#             return {
+#                 'rho': rho_val,
+#                 'rho_e': rho_e_val,
+#                 'predh5final': predh5final,
+#                 'h5': h5
+#             }
+#         except Exception as e:
+#             print(f"Error with rho={rho_val}, rho_e={rho_e_val}: {str(e)}")
+#             return {
+#                 'rho': rho_val,
+#                 'rho_e': rho_e_val,
+#                 'predh5final': np.nan,
+#                 'h5': np.nan
+#             }
     
-    # Function to run all simulations and save results
-    def run_all_simulations():
-        # Generate parameter values
-        rho_values = [r/10 for r in range(-40, 11) if r != 0]  # -4.0 to 1.0 in 0.1 increments, skip 0
-        rho_e_values = [r/10 for r in range(-40, 11) if r != 0]  # -4.0 to 1.0 in 0.1 increments, skip 0
+#     # Function to run all simulations and save results
+#     def run_all_simulations():
+#         # Generate parameter values
+#         rho_values = [r/10 for r in range(-40, 11) if r != 0]  # -4.0 to 1.0 in 0.1 increments, skip 0
+#         rho_e_values = [r/10 for r in range(-40, 11) if r != 0]  # -4.0 to 1.0 in 0.1 increments, skip 0
         
-        results = []
+#         results = []
         
-        # Run simulations for all parameter combinations
-        total_combinations = len(rho_values) * len(rho_e_values)
-        completed = 0
+#         # Run simulations for all parameter combinations
+#         total_combinations = len(rho_values) * len(rho_e_values)
+#         completed = 0
         
-        for rho_val, rho_e_val in product(rho_values, rho_e_values):
-            print(f"Running simulation {completed+1}/{total_combinations}: rho={rho_val}, rho_e={rho_e_val}")
-            result = run_simulation(rho_val, rho_e_val)
-            results.append(result)
-            completed += 1
+#         for rho_val, rho_e_val in product(rho_values, rho_e_values):
+#             print(f"Running simulation {completed+1}/{total_combinations}: rho={rho_val}, rho_e={rho_e_val}")
+#             result = run_simulation(rho_val, rho_e_val)
+#             results.append(result)
+#             completed += 1
             
-            # Save intermediate results every 10 simulations
-            if completed % 10 == 0:
-                df = pd.DataFrame(results)
-                df.to_csv('policy_results_intermediate70.csv', index=False)
-                print(f"Saved intermediate results ({completed}/{total_combinations})")
+#             # Save intermediate results every 10 simulations
+#             if completed % 10 == 0:
+#                 df = pd.DataFrame(results)
+#                 df.to_csv('policy_results_intermediate70.csv', index=False)
+#                 print(f"Saved intermediate results ({completed}/{total_combinations})")
         
-        # Create DataFrame and save to CSV
-        df = pd.DataFrame(results)
-        df.to_csv('policy_results70.csv', index=False)
-        print("All simulations completed. Results saved to policy_results.csv")
+#         # Create DataFrame and save to CSV
+#         df = pd.DataFrame(results)
+#         df.to_csv('policy_results70.csv', index=False)
+#         print("All simulations completed. Results saved to policy_results.csv")
     
-    run_all_simulations()
+#     run_all_simulations()
 
     # rho = -0.1
     # rho_e = -2

@@ -6,25 +6,41 @@ Summer 2025
 This code is designed to implement something similar to Del Boca's method of simulated moments to estimate the model parameters
 
 The code completes the following steps: 
-1. Create thousands of households with a level of parent human capital, wage rate trajectories, and government input trajectories
-2. Import the latent factor estimates for the 
-3. Use the equation for the simulated method of moments to find the moment estimator
+1. Import (or for now, create) the latent factor moments
+2. Create thousands of households with a level of parent human capital, wage rate trajectories, and government input trajectories
+3. Use the equation for the simulated method of moments to find the best parameters
 
-8-12 processors
-If already in queue: do below command to figure out how long it's going to take
+Currently, there is code to work with both two-step SMM and grid search SMM: 
+- Two-step SMM should work IF SMM minimzer can cover whole parameter space
+- Otherwise, we'll need to use a grid search SMM (or adaptive Metropolis, since grid search SMM is infeasible with our current solver)
+
+
+
+NOTES FOR USING FIREBIRD: 
+To test when submitted bash script will run: 
 squeue --start -j <jobid>
 
 
-To test bash script (time): 
+To test bash script BEFORE submission (time): 
 sbatch --test-only myscript.sh
 
-
+To allocate a node to play around with Firebird a bit
 salloc -t 60 --cpus-per-task=1 --mem-per-cpu=32gb --partition=unowned
 
 
 Don't use base environment, create conda env
 
+
+NOTE: a conda environment exists for this code (and the adaptive Metropolis code)
+
+
+Dependencies: 
+- numpy
+- scipy
+- matplotlib (for convergence estimates)
 """
+# TODO: figure out exactly why solve_system.py is failing at some points (i.e., failing to find a solution)
+# TODO: see if we can edit Nelder-Mead simplex to cover entire parameter space
 
 # Imports
 import numpy as np
@@ -41,7 +57,10 @@ import subprocess
 
 # ---------------- CONSTANTS ------------------
 # General
+
+# Number of households to create/use in SMM
 NUMBER_OF_HOUSEHOLDS = 1000
+# Names of each household column / what they refer to
 HOUSEHOLD_VARIABLES = [
     "Parent Human Capital", 
     "Wage Rate Trajectory", 
@@ -51,18 +70,29 @@ HOUSEHOLD_VARIABLES = [
     "Optimal Parental Investment", 
     "Child Human Capital Trajectory", 
 ]
+# Number of periods in the model
 NUM_PERIODS = 4
+# Number of moments used in the SMM
+# 6 moments per period: mean and std of leisure, expenditure, and child human capital
+# Four periods total => 24 moments total
 NUM_MOMENTS = 24
+# Filepath to the latent factor estimates
 LATENT_FACTOR_FILEPATH = os.path.dirname(os.path.abspath(__file__)) + "/Attanasio Replication/6-26_estimation_results.xlsx"
+# Filepath to the output file for parameter estimates
 PARAM_OUTPUT_FILEPATH = "parameter_estimates_SMM.txt"
+# Optimization method for the SMM
+# Del Boca uses Nelder-Mead, but we're trying out different solvers
+# See https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html for more information
 METHOD_OPTIMIZATION = 'L-BFGS-B'
 
 # Household-generation
+# These refer to variables in the model (see Michael's parameter estimation write-up for more information)
+# Also, Michael has a document named "parameters" that may be useful
 MU_WAGE_RATE_GROWTH = 0.07
 ETA_STD_WAGE_RATE_GROWTH = 0.02
 
 # --------------- PARAMETERS ---------------
-num_workers = 0  # Number of CPU cores to use, set to zero to use all available cores
+num_workers = 0  # Number of max CPU cores to use, set to zero to use all available cores
 
 # Actual parameters to estimate 
 
@@ -85,7 +115,7 @@ STEP_SIZES = {
     "theta_3" : 0.5, 
 
 }
-# Initial guesses for parameters (NOT APPLICABLE IN CURRENT CODE)
+# Initial guesses for parameters (applicable if not using grid search)
 parameters = [
     12,  # Delta parameter
     -0.3, # rho
@@ -93,20 +123,26 @@ parameters = [
     0.35, # theta_1
     0.15, # theta_2
     0.25, # theta_3
-# TODO: check if this is wrong (shouldn't I have different thetas over time?)
+    # TODO: change these parameters to reflect new equations (Michael has yet to add them to the code)
 ]
+
+# The parameters that create the 'empirical' moments
+# Right now, since we don't have latent factor moments, we are creating households, solving them for the following parameters, and then using the moments from those households as the empirical moments
 parameters_to_optimize = [20, -0.2,-0.2,0.3, 0.2, 0.2]
-# Ranges for parameters
+
+# Ranges for parameters (applicable to grid search)
 # rho (and rho_e): -5 to 0.5
 # thetas: 0 to 1
 # delta parameter: 0 to 100
 
 times_elapsed = []
 
-# TODO: look into Del Boca
+# TODO: look into Del Boca code and see how they make SMM so efficient (is it just different equations, or something else?)
 # TODO: try different solvers for minimization
 # TODO: look into JAX
 # ----------------- FUNCTIONS ---------------------
+
+# A function to load the latent factors from a file
 def load_latent_factors(filepath): 
     # Random parameters, since we don't have any data
     # TODO: replace
@@ -120,7 +156,7 @@ def load_latent_factors(filepath):
     return list(itertools.chain(means_leisure, means_parental_investment, means_child_hc, stds_leisure, stds_parental_investment, stds_child_hc))
 
 
-
+# A function to create the households, based on Michael's specification
 def create_households(num_households: int) -> np.ndarray: 
     # 7 columns, 3 for inputs (parent HC, wage rate, and govt), and 4 for solver (consumption, leisure, investment, child HC)
     
@@ -135,13 +171,13 @@ def create_households(num_households: int) -> np.ndarray:
     # Wage rate
     wage_rates = np.ones((num_households, ))
     households[:, 0, 1] = wage_rates
-    for i in range(NUM_PERIODS): 
+    for i in range(1, NUM_PERIODS): 
         wage_rates = (1+MU_WAGE_RATE_GROWTH)*wage_rates + np.random.normal(0, ETA_STD_WAGE_RATE_GROWTH, (num_households, ))
         households[:, i, 1] = wage_rates
 
 
     # Government inputs
-    # TODO: create 
+    # TODO: change this in line with what Michael decides (since government inputs should be correlated with wage draws)
     government_input_means = [0.0005, 0.019, 0.017, 0.013]
     government_input_stds = [0.0001, 0.004, 0.003, 0.002]
     for i in range(NUM_PERIODS): 
@@ -153,13 +189,14 @@ def create_households(num_households: int) -> np.ndarray:
 
 
 
-
+# A helper function to solve a single household in parallel
 def solve_one(args):
     parameters, hh = args
     # Solve for a single household
     solved = solve_system.solve_household(parameters, hh)
     return solved
 
+# The function to solve all households in parallel
 def solve_households(households: np.ndarray, parameters: list, num_workers=0) -> np.ndarray:
     """
     Solves a numerical system for each household in parallel using multiple CPU cores.
@@ -189,28 +226,32 @@ def solve_households(households: np.ndarray, parameters: list, num_workers=0) ->
         households[i, :, 3:] = solved
     return households
 
-
+# A function to compute the moments from the households
 def moments(households): 
     moments = np.zeros(NUM_MOMENTS)
     # The columns for each respective moment
     moment_leisure = 4
     moment_expenditure = 5
     moment_child_hc = 6
+    # Looping through all periods, adding the moments in a particular order
     for i in range(NUM_PERIODS): 
-        moments[i] = np.mean(households[:, i, moment_leisure])
-        moments[i+NUM_PERIODS] = np.mean(households[:, i, moment_expenditure]) 
-        moments[i+2*NUM_PERIODS] = np.mean(households[:, i, moment_child_hc])
-        moments[i+3*NUM_PERIODS] = np.std(households[:, i, moment_leisure])
-        moments[i+4*NUM_PERIODS] = np.std(households[:, i, moment_expenditure]) 
-        moments[i+5*NUM_PERIODS] = np.std(households[:, i, moment_child_hc])
+        moments[i] = np.nanmean(households[:, i, moment_leisure])
+        moments[i+NUM_PERIODS] = np.nanmean(households[:, i, moment_expenditure]) 
+        moments[i+2*NUM_PERIODS] = np.nanmean(households[:, i, moment_child_hc])
+        moments[i+3*NUM_PERIODS] = np.nanstd(households[:, i, moment_leisure])
+        moments[i+4*NUM_PERIODS] = np.nanstd(households[:, i, moment_expenditure]) 
+        moments[i+5*NUM_PERIODS] = np.nanstd(households[:, i, moment_child_hc])
     
     return np.array(moments)
 
 # Helper function to check if a matrix is positive semi-definite (PSD)
+# (I'm getting errors for which a potential cause would be the covariance matrix not being PSD)
 def isPSD(A, tol=1e-8):
   E = np.linalg.eigvalsh(A)
   return np.all(E > -tol)
 
+# A function to compute the weighting matrix for the SMM
+# NOTE: this is changed in the adaptive metropolis (check to see if that works)
 def compute_weighting_matrix(moment_list: np.ndarray) -> np.ndarray:
     moment_list = np.atleast_2d(moment_list)
     S = np.cov(moment_list.T)
@@ -220,18 +261,22 @@ def compute_weighting_matrix(moment_list: np.ndarray) -> np.ndarray:
     
     return final
 
+# A function to simulate moments based on the parameters and households
 def simulate_moments(param_vec: list, households: np.ndarray, num_workers=0) -> np.ndarray:
-    # Creating the households
-    # TODO: only create the households once, so that the only thing changing over time is the parameters
+    # Solving the households and returning the moments
     households = solve_households(households, param_vec, num_workers)
     return moments(households)
 
+# Objective function for the optimization
 def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray, households: np.ndarray, num_workers=0) -> float:# 
     ticker = time.perf_counter()
     simulated = simulate_moments(param_vec, households, num_workers)
     # Error is the percent difference from simulated, not absolute difference (to ensure weighting isn't affected by units)
     diff = (empirical - simulated) / (np.abs(empirical))
+    # Computing the loss based on SMM protocol
     loss = diff.T @ weighting @ diff
+
+    # Various print statements for debugging
     if loss < 0: 
         print(f"Warning: Loss is negative with a value of {loss}. This may cause issues with optimization.")
     print(f"Current parameters: {param_vec}")
@@ -241,22 +286,31 @@ def objective(param_vec: list, empirical: np.ndarray, weighting: np.ndarray, hou
     print(f"Average time for simulation: {np.average(times_elapsed)}")
     return loss
 
+# A function to perform the two-step SMM
 def two_step_smm(empirical: np.ndarray, initial_guess, households: np.ndarray, tolerances=[0.01, 0.001], num_workers=0):
-    # print(f"Running two-step SMM with guess {np.ndarray(initial_guess)}")
-    # Constraints:
-    # 1. 0 < rho (parameter[1]) < 1
-    # 2. 0 < rho_e (parameter[2]) < 1
+    # Hard constraints:
+    # 1. rho (parameter[1]) < 1
+    # 2. rho_e (parameter[2]) < 1
     # 3. theta_1 + theta_2 + theta_3 + theta_4 = 1 (parameters[3:7]) (built-in to system solver now)
 
+
+    # Soft bounds: 
+    # 0.1 < Delta < 100
+    # -5 < rho < 0.5
+    # -5 < rho_e < 0.5
+    # 0.05 < theta_1, theta_2, theta_3 < 1
+
     # Bounds for all parameters (None means no bound)
-    lower_bounds = [-1e10, -1e10, -1e10, 0.0001, 0.0001, 0.0001]
-    upper_bounds = [1e10, 1, 1, 1, 1, 1]
+    lower_bounds = [0.1, -4, -4, 0.05, 0.05, 0.05]
+    upper_bounds = [100, 1, 1, 0.85, 0.85, 0.85]
     bounds = Bounds(lower_bounds, upper_bounds)
 
+    # print(f"Running two-step SMM with guess {np.ndarray(initial_guess)}")
 
-
-
+    # Using the identity weighting matrix for first stage
     W1 = np.eye(len(empirical))
+
+    # Solving for the first-stage SMM
     res1 = minimize(
         objective,
         initial_guess,
@@ -266,19 +320,24 @@ def two_step_smm(empirical: np.ndarray, initial_guess, households: np.ndarray, t
         options={'disp': True}, 
         tol=tolerances[0]
     )
+    # If successful, move onto second
     if res1.success:
         print("Successfully completed first step of SMM.")
         print("Full first optimizer message: ")
         print(res1)
         print("\nInitial guesses for parameters:")
         print(res1.x)
-        theta_1 = res1.x
+        theta_1 = res1.x # To avoid confusion: in this case, theta represents the vector of parameters, and theta_1 is the first-stage parameters (it's common notation in the field)
+
+        # Calculating second-stage weighting matrix
         sims = np.ndarray((20, NUM_MOMENTS))
         for i in range(20): 
             households = create_households(NUMBER_OF_HOUSEHOLDS)
             sims[i] = simulate_moments(theta_1, households, num_workers)
         print("Computing more optimal weighting matrix...")
         W2 = compute_weighting_matrix(sims)
+
+        # Starting the second step of SMM
         print("Starting second step of SMM")
         res2 = minimize(
             objective,
@@ -298,7 +357,9 @@ def two_step_smm(empirical: np.ndarray, initial_guess, households: np.ndarray, t
         print(f"First step of two-step SMM failed for guess {initial_guess}")
         return None, None
 
-# TODO: make sure this is right
+
+# A function to bootstrap confidence intervals for the parameter estimates
+# TODO: make sure this is right (HAS NOT BEEN CHECKED)
 def bootstrap_confidence_intervals(empirical, initial_guess, B=10, step_sizes=STEP_SIZES, tolerances=[0.01, 0.001], grid_search=True):
     bootstrap_estimates = []
     for _ in range(B):
@@ -317,7 +378,8 @@ def bootstrap_confidence_intervals(empirical, initial_guess, B=10, step_sizes=ST
     upper = np.percentile(estimates, 97.5, axis=0)
     return lower, upper
 
-
+# A function to test the convergence of the parameter estimates as the number of households increases
+# TODO: test (HAS NOT BEEN CHECKED)
 def convergence_test(empirical, parameters):
     household_sizes = [500, 1000, 2000, 5000, 10000]
     estimates = []
@@ -340,10 +402,11 @@ def convergence_test(empirical, parameters):
     plt.close()
 
 
-# Helper function (to run SMM)
+# Helper function (to run grid search SMM)
 def run_smm(args):
     return two_step_smm(*args)
 
+# A function to perform a grid search over initial guesses for parameters and find the global minimum.
 def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: dict, tolerances: list):
     """
     Performs a grid search over initial guesses for parameters and finds the global minimum.
@@ -397,6 +460,7 @@ def grid_search_smm(empirical: np.ndarray, households: np.ndarray, step_sizes: d
 
     return best_params, best_obj_val
 
+# A function to test the performance of the two-step SMM with varying numbers of processes
 def performance_test(empirical, households, num_processes): 
     performance_times = []
     for i in range(5, num_processes): 
@@ -433,6 +497,7 @@ def performance_test(empirical, households, num_processes):
 # ------- HELPER FUNCTIONS --------------
 
 # COPIED FROM INTERNET
+# A function to determine the number of available CPUs on the system.
 def available_cpu_count():
     """ Number of available virtual or physical CPUs on this system, i.e.
     user/real as output by time(1) when called with an optimally scaling
@@ -537,8 +602,10 @@ def available_cpu_count():
 
     return 0
 
+
 # A function to compute the condition number of the Jacobian of the moment conditions.
-# This is useful for diagnosing potential issues with the parameter estimation process.
+# This may be useful for diagnosing potential issues with the parameter estimation process.
+# Also, it should be useful for determining the right optimizer? But I haven't figured that out yet
 def condition_number(param_vec: list, epsilon=1e-5) -> float:
     """Compute condition number of the Jacobian of moment conditions."""
     base_moments = simulate_moments(param_vec)

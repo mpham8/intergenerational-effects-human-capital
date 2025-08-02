@@ -3,8 +3,8 @@
 #SBATCH --requeue                  # Return job to the queue if preempted
 #SBATCH --job-name=adaptive-metropolis        # Assign a short name to your job
 #SBATCH --nodes=1                  # Number of nodes you require
-#SBATCH --cpus-per-task=16          # Cores per task (>1 if multithread tasks)
-#SBATCH --mem-per-cpu=16gb         # Real memory per cpu
+#SBATCH --cpus-per-task=40          # Cores per task (>1 if multithread tasks)
+#SBATCH --mem-per-cpu=32gb         # Real memory per cpu
 #SBATCH --time=02-00:00:00         # Total run time limit (DD-HH:MM:SS)
 #SBATCH --output=slurm.adaptive-MH.%N.%j.out   # STDOUT file for SLURM output
 #SBATCH --mail-type=ALL            # Email if anything happens (job start, end, failure, requeue, etc.)

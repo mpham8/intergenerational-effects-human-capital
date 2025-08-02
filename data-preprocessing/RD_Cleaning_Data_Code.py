@@ -445,12 +445,15 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             # print(f"Making sure {column_name} is a special case")
             column_name = column_name[:-5]  # Remove the last 5 characters (the XRND and the underscore)
 
+        # Filter out unwanted suffixes from the column name
+        # This is specifically to handle transfer variables (ending in "REVISED_XRND")
         for suffix in column_suffixes_to_remove:
             if column_name.endswith(suffix):
                 # print(f"Removing suffix '{suffix}' from column name: {column_name}")
                 # Remove the suffix from the column name
                 column_name = column_name[:-len(suffix)]
 
+        # Skipping the mother ID column
         if column_name == 'CASEID_1979':
             continue
             
@@ -526,6 +529,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             if new_data[(new_data['age'] == -1) & (new_data[column_name].notna())].empty:
                 # If there is no value for age -1, we will fill it in with age -2, or -3, and so on
                 # Get the greatest negative age that has a value for the column (i.e., the most recent age before birth)
+                # This is important so that we have parental characteristics for the child before birth
                 negative_ages = new_data[(new_data['age'] < 0) & (new_data[column_name] >= 0)]['age']
                 if not negative_ages.empty:
                     greatest_negative_age = negative_ages.max()
@@ -549,9 +553,11 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             new_data[column_name] = new_data['MPUBID_XRND'].map(mother_map)
     
 
-    # Removing all outliers from the current data
+    # Removing all outliers from the current data if we have an outlier threshold set
     if OUTLIER_THRESHOLD is not None: 
         print("Removing outliers from the data...")
+        # Defining the columns to check for outliers
+        # MOM_HELPS_CH_LEARN columns are binary and act weirdly when checking for outliers, so don't check them
         columns_to_check = [col for col in new_data.columns if col not in ['id', 'age', 'year', 'MOM_HELPS_CH_LEARN_NUMBERS', 'MOM_HELPS_CH_LEARN_ALPHABET', 'MOM_HELPS_CH_LEARN_COLORS', 'MOM_HELPS_CH_LEARN_SHAPES']]
         new_data = remove_outliers(new_data, columns_to_check, threshold=OUTLIER_THRESHOLD)
 
@@ -562,11 +568,14 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
     # Adding "Number of Older Siblings" and "Number of Children" columns using child IDs and mother IDs
     for child_id in nls_data['id'].unique(): 
+        # Gathering information about the child
         mother_id = nls_data.loc[nls_data['id'] == child_id, 'MPUBID_XRND'].values[0]
         siblings = nls_data.loc[nls_data['MPUBID_XRND'] == mother_id, 'id'].unique()
         child_age = nls_data.loc[nls_data['id'] == child_id, 'CYRB_XRND'].values[0]
+        # Getting the number of siblings
         num_siblings = len(siblings)
         num_older_siblings = 0
+        # Determining which siblings are older than the child
         for sibling in siblings: 
             # If the sibling is the child itself, skip it
             if sibling == child_id: 
@@ -579,6 +588,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             if sibling_age < child_age: 
                 num_older_siblings += 1
 
+        # Set the "Number of Older Siblings" and "Number of Children" columns for the child in the new_data DataFrame
         new_data.loc[new_data['id'] == child_id, 'NUM_OLDER_SIBLINGS'] = num_older_siblings
         new_data.loc[new_data['id'] == child_id, 'NUM_CHILDREN'] = num_siblings
 
@@ -609,7 +619,8 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
     else:
         print("Warning: 'MOTHER_BIRTH_YEAR' or 'year' column not found. 'MOTHER_AGE' will not be calculated.")
     
-    # Rescale columns
+    # Rescaling columns
+
     # Rescale columns according to rescaling_variables
     print("Rescaling columns...")
     for column in new_data.columns:
@@ -642,6 +653,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
 
 
     # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
+    # NOTE: if you want to change the age range, you need to modify this line
     new_data = new_data[(new_data['age'] >= -1) & (new_data['age'] <= 19)]
 
     return new_data
@@ -709,7 +721,7 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
         period_end_age = period_info[1]
         row = {'id': child_id, 'period': period}
 
-        # For Child_Human_Capital variables: take value at period end age
+        # For Child_Human_Capital variables: take value at period end age (e.g. period 0's child human capital is at age 5)
         for col in value_cols:
             if col in chc_vars:
                 val = group.loc[group['age'] == period_end_age, col]
@@ -724,13 +736,13 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
                     else:
                         row[col] = np.nan
             else:
-                # For other variables: mean over the period
+                # For other variables: mean over the period (all values exist from interpolated)
                 row[col] = group[col].mean()
         result_rows.append(row)
 
     period_data = pd.DataFrame(result_rows)
 
-    # Handle pre-birth period (-1): use age=0 for Child_Human_Capital variables
+    # Handle pre-birth period (-1)
     if not pre_birth.empty:
         pre_birth_rows = []
         for child_id, group in pre_birth.groupby('id'):
@@ -745,6 +757,7 @@ def aggregate_period_data(df: pd.DataFrame, age_periods: dict) -> pd.DataFrame:
     return period_data
 
 # Function to transform the period data from a long to wide format
+# NOTE: this part of the code has not been checked as carefully as the rest, so it may need some adjustments
 def transform_period_data(age_panel: pd.DataFrame, period_panel: pd.DataFrame) -> pd.DataFrame:
     """ 
     Transforms the period data from long to wide format using both the child-age panel and the child-period panel.
@@ -753,6 +766,8 @@ def transform_period_data(age_panel: pd.DataFrame, period_panel: pd.DataFrame) -
     - For Parent_Characteristics: one column, earliest value (smallest age) from age_panel
     - All other variables: wide format, one column per period (within variable's age range) from period_panel
     """
+
+    # Gathering variable information
     id_col = 'id'
     period_col = 'period'
     value_cols = [col for col in period_panel.columns if col not in [id_col, period_col]]
@@ -862,6 +877,7 @@ def remove_outliers(df: pd.DataFrame, columns: list, threshold: float = 3.0) -> 
 # Function to get CPI values from the BLS CPI data (aggregating over months)
 def get_CPI_values(CPI_file_path: str) -> np.ndarray:
     CPI_data = pd.read_excel(CPI_file_path, header=3)
+    # Aggregating over monthly data to get yearly CPI values
     CPI_data['yearly_data'] = CPI_data.iloc[:, 2:].sum(axis=1, numeric_only=True)
     return dict(zip(CPI_data['Year'].values, CPI_data['yearly_data']))
 

@@ -1,19 +1,98 @@
+
+"""
+Bijan Taheri (O'Connell Lab)
+Summer 2025
+
+This code runs an adaptive Metropolis algorithm, almost entirely based on the paper below: 
+Haario, Heikki, et al. “An Adaptive Metropolis Algorithm.” Bernoulli, vol. 7, no. 2, 2001, pp. 223–42. JSTOR, https://doi.org/10.2307/3318737. Accessed 1 Aug. 2025.
+
+The first section of the code defines a class for an adaptive Metropolis algorithm using SMM. 
+The second section of the code has some helper functions used by the class. 
+The final section of the code runs the adaptive Metropolis algorithm. 
+
+The algorithm uses a two-step SMM in conjunction with adaptive Metropolis to estimate parameters for the DSGE. 
+
+
+
+Dependencies: 
+- numpy
+- pandas
+- matplotlib
+- scipy
+
+TODO: implement "greedy" start suggested by Haario et al. (2001)?
+TODO: implement other efficiency procedures in Haario et al. (2001)
+TODO: implement more rigorous diagnostics (many of which are described here: https://www2.stat.duke.edu/courses/Fall21/sta601.001/slides/09-adaptive-metropolis.html#1)
+TODO: ensure first-stage SMM is not used when calculating final parameter distributions
+TODO: ensure covariance matrix is strictly positive definite when starting AM algorithm
+"""
 import numpy as np
 import pandas as pd
 import pickle
 import os
 import time
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Dict, Callable, Any
 import matplotlib.pyplot as plt
 from scipy import stats
-import warnings
 
-# Import from your implementation file
+# Import from implementation file
 from Del_Boca_Implementation import create_households, solve_households, moments
 
+
+
 # Constants
+
+# Model
 NUM_PERIODS = 4
 NUM_MOMENTS = 24
+
+# MCMC
+INITIAL_PARAMS = [10, -0.3, -0.1, 0.4, 0.2, 0.1] # close, but not equal to 'empirical' params
+INITIAL_HOUSEHOLDS = 1000 # number of households starting off
+MAX_HOUSEHOLDS = 10000 # maximum number of households reached
+HOUSEHOLD_INCREASE_THRESHOLD = 0.03 # when the number of households are increased
+ADAPTATION_START_TIME = 3000
+EPSILON = 0.05
+PROPOSAL_STRATEGY = 'adaptive' # choose between 'adaptive' (purely adaptive), 'mixed' (custom distributions + some adaptivity), and 'custom' (purely custom)
+STAGE1_ITERATIONS = 10000
+STAGE2_ITERATIONS = 5000
+SAVE_PREFIX = "first_test_run_adaptive"
+
+# Proposal distributions
+# For now, they are all truncated normal dists
+PROPOSAL_DISTS = {
+    'Delta' : {
+        'type' : 'truncated_normal', 
+        'scale' : 30, # scale = std
+        'range' : (1, 100)
+    }, 
+    'rho_val' : {
+        'type' : 'truncated_normal', 
+        'scale' : 0.2,
+        'range' : (-4, 1),
+    }, 
+    'rho_e_val' : {
+        'type' : 'truncated_normal', 
+        'scale' : 0.2, 
+        'range' : (-4, 1)
+    }, 
+    'theta_1' : {
+        'type' : 'truncated_normal', 
+        'scale' : 0.05,
+        'range' : (0, 1)
+    }, 
+    'theta_2' : {
+        'type' : 'truncated_normal', 
+        'scale' : 0.05,
+        'range' : (0, 1)
+    }, 
+    'theta_3' : {
+        'type' : 'truncated_normal', 
+        'scale' : 0.05,
+        'range' : (0, 1)
+    }, 
+
+}
 
 class SMMAdaptiveMetropolis:
     """
@@ -29,6 +108,10 @@ class SMMAdaptiveMetropolis:
                  initial_households: int = 1000,
                  max_households: int = 10000,
                  household_increase_threshold: float = 0.05,
+                 adaptation_start_time: int = 1000, 
+                 epsilon: float = 0.01, 
+                 custom_proposal_dists=None, 
+                 proposal_strategy="adaptive",
                  random_seed: int = 42):
         """
         Initialize the SMM Adaptive Metropolis estimator.
@@ -49,11 +132,15 @@ class SMMAdaptiveMetropolis:
             Maximum number of households
         household_increase_threshold : float
             Threshold for parameter std decrease to increase households
+        adaptation_start : int
+            As described in Haario et al. (2001), the t_0 at which covariance adaptation for proposals begins
+        epsilon: float
+            Epsilon parameter in Haario et al. (2001). Should be small relative to parameters, ensuring our covariance matrix does not become singular
         random_seed : int
             Random seed for reproducibility
         """
         
-        # Set default parameter names and bounds
+        # Set default parameter names, bounds, and values
         if parameter_names is None:
             self.parameter_names = ["Delta", "rho_val", "rho_e_val", "theta_1", "theta_2", "theta_3"]
         else:
@@ -61,12 +148,19 @@ class SMMAdaptiveMetropolis:
             
         if parameter_bounds is None:
             self.parameter_bounds = [
-                (0, 100),      # Delta
-                (-5, 0.5),     # rho_val
-                (-5, 0.5),     # rho_e_val
-                (0, 1),        # theta_1
-                (0, 1),        # theta_2
-                (0, 1)         # theta_3
+                (1, 100),      # Delta
+                (-4, 1),     # rho_1 (right now rho_val)
+                (-4, 1),     # rho_2 (right now rho_e_val)
+                # (-4, 1).   # rho_3
+                (0, 1),        # omega_1^e (right now theta_1)
+                (0, 1),        # omega_1^g (right now theta_2)
+                (0, 1),        # omega_1^h (right now theta_3)
+                # (0, 1),        # omega_2^e
+                # (0, 1),        # omega_2^g
+                # (0, 1),        # omega_2^h
+                # (0, 1),        # omega_3^e
+                # (0, 1),        # omega_3^g
+                # (0, 1),        # omega_3^h
             ]
         else:
             self.parameter_bounds = parameter_bounds
@@ -76,22 +170,34 @@ class SMMAdaptiveMetropolis:
         else:
             self.initial_params = initial_params
             
-        # Simulation parameters
-        self.initial_households = initial_households
-        self.max_households = max_households
-        self.household_increase_threshold = household_increase_threshold
-        self.current_households = initial_households
         
-        # Random state
+        # Simulation parameters
+        self.num_initial_households = initial_households
+        self.num_max_households = max_households
+        self.household_increase_threshold = household_increase_threshold
+        self.num_current_households = initial_households
+        
+        self.simulated_households = create_households(self.num_initial_households)
+
+        # Random state (in case we want to replicate analysis)
         self.random_seed = random_seed
         np.random.seed(random_seed)
         
         # Load or generate empirical moments
+        # NOTE: once we have empirical moments, these lines need to be changed
         if empirical_moments is not None:
             self.empirical_moments = empirical_moments
         else:
             self.empirical_moments = self._generate_placeholder_empirical_moments()
             
+
+        # Load custom parameter distributions
+        self.custom_proposal_dists = custom_proposal_dists or {}
+        self.proposal_strategy = proposal_strategy
+        
+        if self.custom_proposal_dists:
+            validate_custom_proposals(self.custom_proposal_dists, self.parameter_names)
+
         # Initialize chain storage
         self.chain = []
         self.accepted_chain = []
@@ -100,7 +206,9 @@ class SMMAdaptiveMetropolis:
         self.household_count_history = []
         
         # Adaptation parameters
-        self.adaptation_start = 1000
+        self.adaptation_start = adaptation_start_time
+        self.increase_household_spacer = 0
+        self.epsilon = epsilon
         self.current_iteration = 0
         self.n_accepted = 0
         self.covariance_matrix = None
@@ -116,20 +224,22 @@ class SMMAdaptiveMetropolis:
         self.computation_times = []
         
         print(f"Initialized SMM Adaptive Metropolis with {len(self.parameter_names)} parameters")
-        print(f"Starting with {self.current_households} households")
+        print(f"Starting with {self.num_current_households} households")
         
     def _generate_placeholder_empirical_moments(self) -> np.ndarray:
         """Generate placeholder empirical moments using simulation."""
         print("Generating placeholder empirical moments...")
+        # Parameters on which the empirical moments are based (i.e., any test runs should approximate something close to these parameters)
         parameters_to_optimize = [20, -0.2, -0.2, 0.3, 0.2, 0.2]
         
+        # Averaging over multiple simulations of parameters
         empirical_moments_list = []
-        for _ in range(2):
-            households_empirical = create_households(self.initial_households)
+        for _ in range(10): # Increase the number of loops for greater accuracy of "empirical" parameters
+            households_empirical = create_households(self.num_initial_households)
             solved_households = solve_households(households_empirical.copy(), parameters_to_optimize)
             empirical_moments_list.append(moments(solved_households))
-            
         empirical = np.average(empirical_moments_list, axis=0)
+        
         print("Generated empirical moments successfully")
         return empirical
         
@@ -154,36 +264,30 @@ class SMMAdaptiveMetropolis:
         theta_sum = params[3] + params[4] + params[5]  # theta_1 + theta_2 + theta_3
         if theta_sum > 1.0:
             return False
-            
+        
+        # TODO: when adding more parameters, add more constraints (sums for each period)
         return True
         
     def _simulate_moments(self, params: List[float]) -> np.ndarray:
         """Simulate moments for given parameters."""
-        households_sim = create_households(self.current_households)
+        households_sim = create_households(self.num_current_households)
         solved_households = solve_households(households_sim, params)
         return moments(solved_households)
         
-    def _compute_smm_objective(self, params: List[float], n_simulations: int = 1) -> float:
+    def _compute_smm_objective(self, params: List[float]) -> float:
         """Compute SMM objective function with standardized moments."""
-        simulated_moments_list = []
         
-        for _ in range(n_simulations):
-            sim_moments = self._simulate_moments(params)
-            simulated_moments_list.append(sim_moments)
+        # Calculate simulated moments, using the same households every time
+        # NOTE: using the same households every time is based on this article: https://opensourceecon.github.io/CompMethods/struct_est/SMM.html
+        solved_households = solve_households(self.simulated_households, params)
+        simulated_moments = moments(solved_households)
+        
             
-        # Average across simulations
-        avg_simulated_moments = np.mean(simulated_moments_list, axis=0)
+        # Moment differences
+        # NOTE: moments should always be POSITIVE. If moments are not positive, this line may not work
+        moment_diff = (simulated_moments - self.empirical_moments) / self.empirical_moments
         
-        # Compute moment variances if not available (for standardization)
-        if self.moment_variances is None:
-            # Use empirical moments std as rough estimate, or compute from multiple sims
-            self.moment_variances = np.std(simulated_moments_list, axis=0)
-            self.moment_variances[self.moment_variances == 0] = 1.0  # Avoid division by zero
-            
-        # Standardized moment differences
-        moment_diff = (avg_simulated_moments - self.empirical_moments) / self.moment_variances
-        
-        # SMM objective
+        # Standard SMM objective
         smm_obj = moment_diff.T @ self.weighting_matrix @ moment_diff
         
         return smm_obj
@@ -197,23 +301,29 @@ class SMMAdaptiveMetropolis:
         chain_array = np.array(self.accepted_chain[-self.adaptation_start:])
         
         # Compute empirical covariance
+        # TODO: if this is a time-intensive step, use Haario et al. (2001)'s recursive formula for it
         self.mean_params = np.mean(chain_array, axis=0)
         cov = np.cov(chain_array, rowvar=False)
         
         # Adaptive Metropolis scaling
+        # See Haario et al. (2001) and "Efficient Metropolis Jumping Rules" by Gelman et al. (1996) for more explanation
         d = len(self.parameter_names)
-        scaling = (2.38**2) / d
-        epsilon = 0.01
+        scaling_parameter = (2.38**2) / d
         
         # Regularization for numerical stability
-        self.covariance_matrix = scaling * cov + scaling * epsilon * np.eye(d)
-        
+        # NOTE: self.covariance_matrix is equivalent to C_t in Haario et al. (2001)
+        self.covariance_matrix = scaling_parameter * cov + scaling_parameter * self.epsilon * np.eye(d)
+    
+    # TODO: check this function in more detail
     def _should_increase_households(self) -> bool:
         """Determine if household count should be increased."""
-        if (self.current_households >= self.max_households or 
+        if (self.num_current_households >= self.num_max_households or 
             len(self.parameter_std_history) < 5):
             return False
             
+        # If it's too soon since we last updated the households, return false
+        if self.increase_household_spacer < 2: # i.e., less than 2 more parameter proposals have been accepted
+            return False
         # Check if parameter standard deviations have stabilized
         recent_stds = self.parameter_std_history[-5:]
         std_of_stds = np.std(recent_stds, axis=0)
@@ -223,9 +333,14 @@ class SMMAdaptiveMetropolis:
         
     def _increase_household_count(self):
         """Increase the number of households for simulation."""
-        old_count = self.current_households
-        self.current_households = min(int(self.current_households * 1.5), self.max_households)
-        print(f"Increased household count from {old_count} to {self.current_households}")
+        # Calculating the number of new households
+        old_count = self.num_current_households
+        self.num_current_households = min(int(self.num_current_households * 1.5), self.num_max_households)
+        # Creating a new set of households
+        # NOTE: we should probably just add to the old households, but this is easier logic-wise
+        self.simulated_households = create_households(self.num_current_households)
+        self.increase_household_spacer = 0
+        print(f"Increased household count from {old_count} to {self.num_current_households}")
         
     def _compute_diagnostics(self) -> Dict[str, Any]:
         """Compute chain diagnostics."""
@@ -262,10 +377,55 @@ class SMMAdaptiveMetropolis:
         diagnostics['rhat_available'] = False
         
         return diagnostics
-        
+    
+    def _compute_optimal_weighting_matrix(self):
+        """Compute optimal weighting matrix with robust PSD enforcement."""
+        weighting_matrix, diagnostics, success = compute_optimal_weighting_matrix_robust(
+            accepted_chain=self.accepted_chain,
+            simulate_moments_func=self._simulate_moments,
+            num_moments=NUM_MOMENTS,
+            min_samples_multiplier=2,
+            max_param_vectors=500,
+            subsample_target=200
+        )
+    
+        if success:
+            self.weighting_matrix = weighting_matrix
+            # Save diagnostics if desired
+            save_weighting_matrix_diagnostics(
+                diagnostics,
+                np.eye(NUM_MOMENTS),  # placeholder for original_cov
+                np.eye(NUM_MOMENTS),  # placeholder for final_cov  
+                weighting_matrix
+            )
+        else:
+            print("Using identity weighting matrix")
+            self.weighting_matrix = np.eye(NUM_MOMENTS)
+    
+    def _propose_parameters(self, current_params): 
+        """Proposing parameters in our adaptive Metropolis algorithm"""
+        if self.proposal_strategy == "custom":
+            proposal = propose_custom_parameters(
+                current_params, self.parameter_names, self.custom_proposal_dists
+            )
+        elif self.proposal_strategy == "mixed":
+            proposal = propose_mixed_parameters(
+                current_params, self.parameter_names, self.custom_proposal_dists,
+                self.covariance_matrix, 
+                use_adaptive=(self.covariance_matrix is not None and 
+                            len(self.accepted_chain) > self.adaptation_start)
+            )
+        else:  # "adaptive"
+            proposal = propose_adaptive_parameters(
+                current_params, self.parameter_names, self.custom_proposal_dists,
+                self.covariance_matrix,
+                use_adaptive=(self.covariance_matrix is not None and 
+                            len(self.accepted_chain) > self.adaptation_start)
+            )
+        return proposal
+
     def run_mcmc(self, 
                  n_iterations: int,
-                 n_simulations_per_eval: int = 1,  
                  save_every: int = 100,
                  save_prefix: str = "smm_mcmc") -> Dict[str, Any]:
         """
@@ -275,8 +435,6 @@ class SMMAdaptiveMetropolis:
         -----------
         n_iterations : int
             Number of MCMC iterations
-        n_simulations_per_eval : int
-            Number of simulations per SMM evaluation
         save_every : int
             Save checkpoint every N iterations
         save_prefix : str
@@ -293,7 +451,7 @@ class SMMAdaptiveMetropolis:
         # Initialize current parameters
         if len(self.chain) == 0:
             current_params = self.initial_params.copy()
-            current_smm = self._compute_smm_objective(current_params, n_simulations_per_eval)
+            current_smm = self._compute_smm_objective(current_params)
             self.chain.append(current_params)
             self.accepted_chain.append(current_params)
             self.smm_values.append(current_smm)
@@ -308,15 +466,7 @@ class SMMAdaptiveMetropolis:
             self.current_iteration += 1
             
             # Propose new parameters
-            if (self.covariance_matrix is not None and 
-                len(self.accepted_chain) > self.adaptation_start):
-                # Use adaptive covariance
-                proposal = np.random.multivariate_normal(current_params, self.covariance_matrix)
-            else:
-                # Use scaled identity matrix
-                d = len(self.parameter_names)
-                scale = 0.1  # Initial proposal scale
-                proposal = current_params + np.random.normal(0, scale, d)
+            proposal = self._propose_parameters(current_params)
                 
             # Check constraints
             if not self._check_parameter_constraints(proposal):
@@ -326,7 +476,7 @@ class SMMAdaptiveMetropolis:
                 self.acceptance_history.append(False)
             else:
                 # Evaluate SMM objective
-                proposal_smm = self._compute_smm_objective(proposal, n_simulations_per_eval)
+                proposal_smm = self._compute_smm_objective(proposal)
                 
                 # Metropolis acceptance step (convert SMM to pseudo-likelihood)
                 log_alpha = -0.5 * (proposal_smm - current_smm)
@@ -339,6 +489,7 @@ class SMMAdaptiveMetropolis:
                     self.accepted_chain.append(current_params)
                     self.n_accepted += 1
                     self.acceptance_history.append(True)
+                    self.increase_household_spacer += 1
                 else:
                     # Reject proposal
                     self.acceptance_history.append(False)
@@ -351,7 +502,7 @@ class SMMAdaptiveMetropolis:
                 self._update_adaptive_covariance()
                 
             # Track household count
-            self.household_count_history.append(self.current_households)
+            self.household_count_history.append(self.num_current_households)
             
             # Track parameter standard deviations
             if len(self.accepted_chain) > 50:
@@ -373,10 +524,10 @@ class SMMAdaptiveMetropolis:
                 current_best_smm = min(self.smm_values)
                 avg_time = np.mean(self.computation_times[-100:])
                 
-                print(f"Iteration {self.current_iteration}: "
+                print(f"--Iteration {self.current_iteration}: "
                       f"Accept Rate: {acceptance_rate:.3f}, "
                       f"Best SMM: {current_best_smm:.6f}, "
-                      f"Households: {self.current_households}, "
+                      f"Households: {self.num_current_households}, "
                       f"Avg Time: {avg_time:.3f}s")
                       
             # Save checkpoint
@@ -400,7 +551,7 @@ class SMMAdaptiveMetropolis:
     def run_two_step_smm(self,
                         stage1_iterations: int = 20000,
                         stage2_iterations: int = 10000,
-                        n_simulations_per_eval: int = 1,
+                        save_every: int = 100,
                         save_prefix: str = "two_step_smm") -> Dict[str, Any]:
         """
         Run two-step SMM procedure.
@@ -420,7 +571,7 @@ class SMMAdaptiveMetropolis:
         
         stage1_results = self.run_mcmc(
             n_iterations=stage1_iterations,
-            n_simulations_per_eval=n_simulations_per_eval,
+            save_every=save_every,
             save_prefix=f"{save_prefix}_stage1"
         )
         
@@ -438,7 +589,6 @@ class SMMAdaptiveMetropolis:
         
         stage2_results = self.run_mcmc(
             n_iterations=stage2_iterations,
-            n_simulations_per_eval=n_simulations_per_eval,
             save_prefix=f"{save_prefix}_stage2"
         )
         
@@ -451,50 +601,19 @@ class SMMAdaptiveMetropolis:
             'stage2_results': stage2_results,
             'final_estimates': self.get_parameter_estimates()
         }
-        
-    def _compute_optimal_weighting_matrix(self):
-        """Compute optimal weighting matrix from Stage 1 results."""
-        if len(self.accepted_chain) < 100:
-            print("Warning: Too few accepted samples for optimal weighting matrix")
-            return
-            
-        print("Computing moment variance-covariance matrix...")
-        
-        # Use recent accepted parameters to compute moment variance
-        recent_params = self.accepted_chain[-min(500, len(self.accepted_chain)):]
-        
-        moment_sims = []
-        for params in recent_params[::5]:  # Use every 5th to save computation
-            sim_moments = self._simulate_moments(params)
-            moment_sims.append(sim_moments)
-            
-        moment_sims = np.array(moment_sims)
-        
-        # Compute variance-covariance matrix
-        moment_cov = np.cov(moment_sims, rowvar=False)
-        
-        # Regularize for numerical stability
-        regularization = 1e-6 * np.eye(NUM_MOMENTS)
-        moment_cov += regularization
-        
-        # Optimal weighting matrix is inverse of covariance
-        try:
-            self.weighting_matrix = np.linalg.inv(moment_cov)
-            print("Optimal weighting matrix computed successfully")
-        except np.linalg.LinAlgError:
-            print("Warning: Could not invert moment covariance, using identity")
-            self.weighting_matrix = np.eye(NUM_MOMENTS)
             
     def get_parameter_estimates(self) -> Dict[str, Any]:
         """Get parameter estimates and standard errors."""
-        if len(self.accepted_chain) < 10:
-            return {}
             
         chain_array = np.array(self.accepted_chain)
         
         # Remove burnin (first 20% of samples)
         burnin = max(100, len(chain_array) // 5)
         post_burnin = chain_array[burnin:]
+
+        if len(post_burnin) < 100: 
+            print("Too few results to get accurate estimates.")
+            return {}
         
         estimates = {}
         for i, name in enumerate(self.parameter_names):
@@ -538,7 +657,7 @@ class SMMAdaptiveMetropolis:
             'Metric': ['Current Iteration', 'Accepted Samples', 'Current Households', 
                       'Acceptance Rate', 'Is Second Stage', 'Best SMM Value',
                       'Average Computation Time', 'Random Seed'],
-            'Value': [self.current_iteration, self.n_accepted, self.current_households,
+            'Value': [self.current_iteration, self.n_accepted, self.num_current_households,
                      self.n_accepted / max(1, self.current_iteration), self.is_second_stage,
                      min(self.smm_values) if self.smm_values else np.nan,
                      np.mean(self.computation_times[-100:]) if len(self.computation_times) > 0 else np.nan,
@@ -634,24 +753,439 @@ class SMMAdaptiveMetropolis:
             plt.show()
 
 
-# Example usage
+
+# HELPER FUNCTIONS
+# =============================================================================
+# =============================================================================
+
+
+
+# =============================================================================
+# WEIGHTING MATRIX DIAGNOSTICS FUNCTIONS
+# =============================================================================
+
+def compute_optimal_weighting_matrix_robust(accepted_chain: List[List[float]], 
+                                          simulate_moments_func: Callable,
+                                          num_moments: int = 24,
+                                          min_samples_multiplier: int = 2,
+                                          max_param_vectors: int = 500,
+                                          subsample_target: int = 200) -> tuple:
+    """
+    Compute optimal weighting matrix with robust PSD enforcement.
+    
+    Parameters:
+    -----------
+    accepted_chain : List[List[float]]
+        List of accepted parameter vectors from Stage 1
+    simulate_moments_func : Callable
+        Function that takes parameters and returns simulated moments
+    num_moments : int
+        Number of moment conditions
+    min_samples_multiplier : int
+        Minimum samples = min_samples_multiplier * num_moments
+    max_param_vectors : int
+        Maximum parameter vectors to use
+    subsample_target : int
+        Target number of parameter vectors to actually use
+        
+    Returns:
+    --------
+    tuple: (weighting_matrix, diagnostics_dict, success_flag)
+    """
+    
+    min_samples = max(100, min_samples_multiplier * num_moments)
+    
+    if len(accepted_chain) < min_samples:
+        print(f"Warning: Need at least {min_samples} samples, have {len(accepted_chain)}")
+        print("Using identity weighting matrix")
+        return np.eye(num_moments), {}, False
+        
+    print("Computing moment variance-covariance matrix...")
+    
+    # Use recent accepted parameters
+    n_params_to_use = min(max_param_vectors, len(accepted_chain))
+    recent_params = accepted_chain[-n_params_to_use:]
+    
+    # Subsample to target number
+    subsample_rate = max(1, len(recent_params) // subsample_target)
+    moment_sims = []
+    
+    print(f"Using {len(recent_params)} parameter vectors with subsample rate {subsample_rate}")
+    
+    for i in range(0, len(recent_params), subsample_rate):
+        if i % 20 == 0:
+            print(f"  Computing moments for parameter vector {i//subsample_rate + 1}/{len(recent_params)//subsample_rate}")
+        params = recent_params[i]
+        sim_moments = simulate_moments_func(params)
+        moment_sims.append(sim_moments)
+        
+    moment_sims = np.array(moment_sims)
+    print(f"Computed {len(moment_sims)} moment vectors")
+    
+    # Compute variance-covariance matrix
+    moment_cov = np.cov(moment_sims, rowvar=False)
+    
+    # Enforce PSD and compute diagnostics
+    weighting_matrix, diagnostics = enforce_positive_semidefinite(moment_cov, num_moments)
+    
+    return weighting_matrix, diagnostics, True
+
+
+def enforce_positive_semidefinite(moment_cov: np.ndarray, 
+                                num_moments: int,
+                                min_eigenval: float = 1e-8,
+                                diagonal_reg: float = 1e-6) -> tuple:
+    """
+    Enforce positive semi-definiteness and compute weighting matrix.
+    
+    Parameters:
+    -----------
+    moment_cov : np.ndarray
+        Moment covariance matrix
+    num_moments : int
+        Number of moments
+    min_eigenval : float
+        Minimum allowed eigenvalue
+    diagonal_reg : float
+        Additional diagonal regularization
+        
+    Returns:
+    --------
+    tuple: (weighting_matrix, diagnostics_dict)
+    """
+    
+    print("Checking positive semi-definiteness...")
+    eigenvals, eigenvecs = np.linalg.eigh(moment_cov)
+    
+    print(f"Eigenvalue range: [{np.min(eigenvals):.2e}, {np.max(eigenvals):.2e}]")
+    
+    # Count problematic eigenvalues
+    negative_eigs = np.sum(eigenvals < 0)
+    near_zero_eigs = np.sum(np.abs(eigenvals) < 1e-12)
+    
+    if negative_eigs > 0:
+        print(f"Warning: {negative_eigs} negative eigenvalues detected")
+    if near_zero_eigs > 0:
+        print(f"Warning: {near_zero_eigs} near-zero eigenvalues detected (< 1e-12)")
+        
+    # Eigenvalue regularization
+    regularized_eigenvals = np.maximum(eigenvals, min_eigenval)
+    
+    # Reconstruct PSD matrix
+    moment_cov_psd = eigenvecs @ np.diag(regularized_eigenvals) @ eigenvecs.T
+    
+    # Additional diagonal regularization
+    diagonal_reg_matrix = diagonal_reg * np.eye(num_moments)
+    moment_cov_final = moment_cov_psd + diagonal_reg_matrix
+    
+    # Verify final matrix is PSD
+    final_eigenvals = np.linalg.eigvals(moment_cov_final)
+    min_final_eig = np.min(final_eigenvals)
+    
+    if min_final_eig > 0:
+        print(f"Matrix is positive definite (min eigenvalue: {min_final_eig:.2e})")
+    else:
+        print(f"Warning: Matrix still not PSD (min eigenvalue: {min_final_eig:.2e})")
+        
+    # Compute condition number
+    condition_number = np.max(final_eigenvals) / np.min(final_eigenvals)
+    print(f"Condition number: {condition_number:.2e}")
+    
+    if condition_number > 1e12:
+        print("Warning: Matrix is ill-conditioned, results may be unreliable")
+        
+    # Compute weighting matrix
+    try:
+        weighting_matrix = np.linalg.inv(moment_cov_final)
+        
+        # Verify weighting matrix is also PSD
+        w_eigenvals = np.linalg.eigvals(weighting_matrix)
+        if np.min(w_eigenvals) > 0:
+            print("Optimal weighting matrix computed successfully and is positive definite")
+        else:
+            print("Warning: Weighting matrix is not positive definite")
+            
+    except np.linalg.LinAlgError as e:
+        print(f"Error inverting moment covariance: {e}")
+        print("Using identity weighting matrix")
+        weighting_matrix = np.eye(num_moments)
+        
+    # Compile diagnostics
+    diagnostics = {
+        'original_eigenvalues': eigenvals,
+        'regularized_eigenvalues': regularized_eigenvals,
+        'final_eigenvalues': final_eigenvals,
+        'condition_number_original': np.max(eigenvals) / np.max(np.abs(eigenvals[eigenvals != 0])) if np.any(eigenvals != 0) else np.inf,
+        'condition_number_final': condition_number,
+        'negative_eigenvalues': negative_eigs,
+        'near_zero_eigenvalues': near_zero_eigs,
+        'min_eigenvalue_original': np.min(eigenvals),
+        'min_eigenvalue_final': min_final_eig
+    }
+    
+    return weighting_matrix, diagnostics
+
+
+def save_weighting_matrix_diagnostics(diagnostics: Dict[str, Any],
+                                    original_cov: np.ndarray,
+                                    final_cov: np.ndarray,
+                                    weighting_matrix: np.ndarray,
+                                    filename: str = 'weighting_matrix_diagnostics.pkl'):
+    """Save detailed weighting matrix diagnostics."""
+    
+    diagnostic_data = {
+        'diagnostics': diagnostics,
+        'original_covariance': original_cov,
+        'final_covariance': final_cov,
+        'weighting_matrix': weighting_matrix
+    }
+    
+    with open(filename, 'wb') as f:
+        pickle.dump(diagnostic_data, f)
+        
+    print(f"Weighting matrix diagnostics saved to '{filename}'")
+
+
+# =============================================================================
+# CUSTOM PROPOSAL FUNCTIONS
+# =============================================================================
+
+def validate_custom_proposals(custom_proposal_dists: Dict[str, Dict], 
+                            parameter_names: List[str]):
+    """Validate custom proposal distribution specifications."""
+    
+    for param_name, dist_spec in custom_proposal_dists.items():
+        if param_name not in parameter_names:
+            raise ValueError(f"Custom proposal specified for unknown parameter: {param_name}")
+        
+        required_keys = ['type']
+        if not all(key in dist_spec for key in required_keys):
+            raise ValueError(f"Custom proposal for {param_name} missing required keys: {required_keys}")
+        
+        # Validate specific distribution types
+        dist_type = dist_spec['type']
+        if dist_type == 'normal':
+            if not all(key in dist_spec for key in ['mean', 'std']):
+                raise ValueError(f"Normal proposal for {param_name} requires 'std' parameter")
+        elif dist_type == 'lognormal':
+            if 'sigma' not in dist_spec:
+                raise ValueError(f"Lognormal proposal for {param_name} requires 'sigma' parameter")
+        elif dist_type == 'beta':
+            if not all(key in dist_spec for key in ['alpha', 'beta', 'loc', 'scale']):
+                raise ValueError(f"Beta proposal for {param_name} requires 'alpha', 'beta', 'loc', 'scale'")
+        elif dist_type == 'truncated_normal':
+            if not all(key in dist_spec for key in ['scale', 'range']):
+                raise ValueError(f"Truncated normal proposal for {param_name} requires 'scale', 'range'")
+        elif dist_type == 'custom_function':
+            if 'sampler' not in dist_spec:
+                raise ValueError(f"Custom function proposal for {param_name} requires 'sampler' function")
+        else: 
+            raise ValueError(f"Unknown proposal distribution type: {dist_type}")
+
+
+def propose_single_parameter(param_idx: int, 
+                           current_value: float,
+                           parameter_names: List[str],
+                           custom_proposal_dists: Dict[str, Dict],
+                           adaptive_cov_diagonal: np.ndarray = None,
+                           default_scale: float = 0.1) -> float:
+    """
+    Propose new value for a single parameter using custom or adaptive distribution.
+    
+    Parameters:
+    -----------
+    param_idx : int
+        Index of parameter
+    current_value : float
+        Current parameter value
+    parameter_names : List[str]
+        List of parameter names
+    custom_proposal_dists : Dict[str, Dict]
+        Custom proposal specifications
+    adaptive_cov_diagonal : np.ndarray, optional
+        Diagonal of adaptive covariance matrix
+    default_scale : float
+        Default proposal scale
+        
+    Returns:
+    --------
+    float: Proposed parameter value
+    """
+    
+    param_name = parameter_names[param_idx]
+    
+    # Check if we have a custom proposal for this parameter
+    if param_name in custom_proposal_dists:
+        dist_spec = custom_proposal_dists[param_name]
+        dist_type = dist_spec['type']
+        
+        if dist_type == 'normal':
+            std = dist_spec['std']
+            proposal = np.random.normal(current_value, std)
+            
+        elif dist_type == 'lognormal':
+            sigma = dist_spec['sigma']
+            # Sample in log space, then transform
+            log_current = np.log(max(current_value, 1e-10))  # Avoid log(0)
+            log_proposal = np.random.normal(log_current, sigma)
+            proposal = np.exp(log_proposal)
+            
+        elif dist_type == 'beta':
+            alpha, beta = dist_spec['alpha'], dist_spec['beta']
+            loc, scale = dist_spec['loc'], dist_spec['scale']
+            # Sample from beta and transform to desired range
+            beta_sample = np.random.beta(alpha, beta)
+            proposal = loc + scale * beta_sample
+            
+        elif dist_type == 'truncated_normal':
+            scale = dist_spec['scale']
+            lower, upper = dist_spec['range']
+            proposal = stats.truncnorm.rvs(
+                (lower - current_value) / scale,
+                (upper - current_value) / scale,
+                loc=current_value, scale=scale
+            )
+
+        elif dist_type == 'uniform': 
+            lower, upper = dist_spec['range']
+            proposal = np.random.uniform(lower, upper)
+            
+            
+        elif dist_type == 'custom_function':
+            sampler = dist_spec['sampler']
+            proposal = sampler(current_value, **dist_spec.get('kwargs', {}))
+    
+        else:
+            # Fallback to normal
+            proposal = np.random.normal(current_value, default_scale)
+            
+    else:
+        # Use adaptive covariance if available
+        if adaptive_cov_diagonal is not None:
+            var = adaptive_cov_diagonal[param_idx]
+            proposal = np.random.normal(current_value, np.sqrt(max(var, 1e-8)))
+        else:
+            # Default normal proposal
+            proposal = np.random.normal(current_value, default_scale)
+            
+    return proposal
+
+
+def propose_custom_parameters(current_params: List[float],
+                            parameter_names: List[str],
+                            custom_proposal_dists: Dict[str, Dict]) -> np.ndarray:
+    """Propose new parameters using only custom distributions."""
+    
+    proposal = np.zeros(len(current_params))
+    
+    for i, current_val in enumerate(current_params):
+        proposal[i] = propose_single_parameter(
+            i, current_val, parameter_names, custom_proposal_dists
+        )
+        
+    return proposal
+
+
+def propose_mixed_parameters(current_params: List[float],
+                           parameter_names: List[str],
+                           custom_proposal_dists: Dict[str, Dict],
+                           covariance_matrix: np.ndarray = None,
+                           use_adaptive: bool = False) -> np.ndarray:
+    """Mix custom proposals with adaptive covariance where available."""
+    
+    proposal = np.zeros(len(current_params))
+    
+    if use_adaptive and covariance_matrix is not None:
+        # Start with full adaptive proposal
+        adaptive_proposal = np.random.multivariate_normal(current_params, covariance_matrix)
+        
+        # Override with custom proposals where specified
+        for i, param_name in enumerate(parameter_names):
+            if param_name in custom_proposal_dists:
+                proposal[i] = propose_single_parameter(
+                    i, current_params[i], parameter_names, custom_proposal_dists
+                )
+            else:
+                proposal[i] = adaptive_proposal[i]
+    else:
+        # Use individual parameter proposals
+        adaptive_cov_diagonal = None
+        if covariance_matrix is not None:
+            adaptive_cov_diagonal = np.diag(covariance_matrix)
+            
+        for i, current_val in enumerate(current_params):
+            proposal[i] = propose_single_parameter(
+                i, current_val, parameter_names, custom_proposal_dists,
+                adaptive_cov_diagonal
+            )
+            
+    return proposal
+
+
+def propose_adaptive_parameters(current_params: List[float],
+                               parameter_names: List[str],
+                               custom_proposal_dists: Dict[str, Dict],
+                               covariance_matrix: np.ndarray = None,
+                               use_adaptive: bool = False) -> np.ndarray:
+    """Standard adaptive proposal with custom overrides."""
+    
+    if use_adaptive and covariance_matrix is not None:
+        # Use adaptive covariance as base
+        base_proposal = np.random.multivariate_normal(current_params, covariance_matrix)
+        
+        # Override specific parameters with custom proposals
+        for i, param_name in enumerate(parameter_names):
+            if param_name in custom_proposal_dists:
+                base_proposal[i] = propose_single_parameter(
+                    i, current_params[i], parameter_names, custom_proposal_dists
+                )
+                
+        return base_proposal
+    else:
+        # Early phase: use individual proposals
+        proposal = np.zeros(len(current_params))
+        adaptive_cov_diagonal = None
+        if covariance_matrix is not None:
+            adaptive_cov_diagonal = np.diag(covariance_matrix)
+            
+        for i, current_val in enumerate(current_params):
+            proposal[i] = propose_single_parameter(
+                i, current_val, parameter_names, custom_proposal_dists,
+                adaptive_cov_diagonal
+            )
+            
+        return proposal
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# MAIN FUNCTION
+# =============================================================================
+# =============================================================================
+# =============================================================================
+
+
 if __name__ == "__main__":
     
     # Initialize estimator
     estimator = SMMAdaptiveMetropolis(
-        initial_params=[19.5, -0.25, -0.18, 0.28, 0.22, 0.18],
+        initial_params=INITIAL_PARAMS,
         random_seed=42, 
-        initial_households=100, 
-        max_households=1000,
-        household_increase_threshold=0.05
+        initial_households=INITIAL_HOUSEHOLDS, 
+        max_households=MAX_HOUSEHOLDS,
+        household_increase_threshold=HOUSEHOLD_INCREASE_THRESHOLD, 
+        adaptation_start_time=ADAPTATION_START_TIME, 
+        epsilon=EPSILON, 
+        proposal_strategy=PROPOSAL_STRATEGY,
+        custom_proposal_dists=PROPOSAL_DISTS,
     )
     
     # Run two-step SMM
     results = estimator.run_two_step_smm(
-        stage1_iterations=500,  # Reduced for example
-        stage2_iterations=200,   # Reduced for example
-        n_simulations_per_eval=1,
-        save_prefix="example_run", 
+        stage1_iterations=STAGE1_ITERATIONS,  # Reduced for example
+        stage2_iterations=STAGE2_ITERATIONS,   # Reduced for example
+        save_prefix=SAVE_PREFIX, 
     )
     
     # Get final estimates
@@ -665,7 +1199,7 @@ if __name__ == "__main__":
                   f"[{est['quantile_025']:7.4f}, {est['quantile_975']:7.4f}]")
     
     # Plot diagnostics
-    estimator.plot_diagnostics("parameter-estimation/Del_Boca_Replication/estimator_diagnostics.png")
+    estimator.plot_diagnostics(f"parameter-estimation/Del_Boca_Replication/estimator_diagnostics_{SAVE_PREFIX}.png")
     
     print(f"\nEstimation completed!")
     print(f"Total accepted samples: {len(estimator.accepted_chain)}")
