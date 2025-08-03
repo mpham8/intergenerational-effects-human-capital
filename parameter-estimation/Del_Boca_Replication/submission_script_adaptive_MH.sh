@@ -16,7 +16,6 @@ chmod +x "adaptive_metropolis.py"
 chmod +x "Del_Boca_Implementation.py"
 chmod +x "solve_system.py"
 
-conda activate oconnelllab
 
 ## Set the value of BIGSCRATCH to 'true' if your job is
 ## anticipated to require more than a few hundred gigabytes
@@ -51,7 +50,8 @@ cd /$SCRATCHDIR/$USER/$SLURM_JOB_NAME-$SLURM_JOB_ID
 
 ## ADD YOUR COMMANDS HERE
 
-srun adaptive_metropolis.py
+source activate oconnelllab
+python adaptive_metropolis.py
 
 ## Move any outputs and files back to the original submit
 ## directory and clean-up.
