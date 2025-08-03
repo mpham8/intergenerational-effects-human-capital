@@ -12,7 +12,11 @@ The final section of the code runs the adaptive Metropolis algorithm.
 
 The algorithm uses a two-step SMM in conjunction with adaptive Metropolis to estimate parameters for the DSGE. 
 
-
+Here are some more resources to read in case you wanted to learn more: 
+- A great explanation on SMM: https://opensourceecon.github.io/CompMethods/struct_est/SMM.html
+- A presentation that touches on adaptive Metropolis: https://www2.stat.duke.edu/courses/Fall21/sta601.001/slides/09-adaptive-metropolis.html#42
+- A paper providing rationale for 2.38^2/d as the scaling factor: Gareth O. Roberts. Jeffrey S. Rosenthal. "Optimal scaling for various Metropolis-Hastings algorithms." Statist. Sci. 16 (4) 351 - 367, November 2001. \\
+https://doi.org/10.1214/ss/1015346320.
 
 Dependencies: 
 - numpy
@@ -20,6 +24,8 @@ Dependencies:
 - matplotlib
 - scipy
 
+TODO: add the proper variables to reflect the changed equations (this also involves changing the "solve_system.py" function, or Julia equivalent)
+- NOTE: this will also involve changing the number of periods and moments
 TODO: implement "greedy" start suggested by Haario et al. (2001)?
 TODO: implement other efficiency procedures in Haario et al. (2001)
 TODO: implement more rigorous diagnostics (many of which are described here: https://www2.stat.duke.edu/courses/Fall21/sta601.001/slides/09-adaptive-metropolis.html#1)
@@ -47,19 +53,22 @@ NUM_PERIODS = 4
 NUM_MOMENTS = 24
 
 # MCMC
-INITIAL_PARAMS = [10, -0.3, -0.1, 0.4, 0.2, 0.1] # close, but not equal to 'empirical' params
+INITIAL_PARAMS = [10, -0.3, -0.1, 0.4, 0.15, 0.1] # close, but not equal to 'empirical' params
 INITIAL_HOUSEHOLDS = 1000 # number of households starting off
 MAX_HOUSEHOLDS = 10000 # maximum number of households reached
 HOUSEHOLD_INCREASE_THRESHOLD = 0.03 # when the number of households are increased
-ADAPTATION_START_TIME = 3000
-EPSILON = 0.05
+ADAPTATION_START_TIME = 1000 # time after which adaptive covariance starts
+EPSILON = 0.05 # used in calculating proposal covariance matrix. Should be small with respect to moments
 PROPOSAL_STRATEGY = 'adaptive' # choose between 'adaptive' (purely adaptive), 'mixed' (custom distributions + some adaptivity), and 'custom' (purely custom)
-STAGE1_ITERATIONS = 10000
-STAGE2_ITERATIONS = 5000
-SAVE_PREFIX = "first_test_run_adaptive"
+# NOTE: I am unsure if the 'mixed' function is statistically rigorous. 'Adaptive' and 'custom' should be though
+STAGE1_ITERATIONS = 10000 # weighting matrix = identity
+STAGE2_ITERATIONS = 5000 # weighting matrix = inverse of covariance matrix of hat(theta_1)
+SAVE_PREFIX = "first_test_run_adaptive" # also ending of estimator diagnostics graph filename
+RANDOM_SEED = 42 # random seed to base the simulation off of. Select "None" to not have a set seed
 
 # Proposal distributions
 # For now, they are all truncated normal dists
+# NOTE: not used under "adaptive" setting
 PROPOSAL_DISTS = {
     'Delta' : {
         'type' : 'truncated_normal', 
@@ -94,6 +103,13 @@ PROPOSAL_DISTS = {
 
 }
 
+
+
+
+
+# =============================================================
+# DEFINING THE ADAPTIVE METROPOLIS CLASS
+# =============================================================
 class SMMAdaptiveMetropolis:
     """
     Simulated Method of Moments estimator using Adaptive Metropolis-Hastings.
@@ -112,7 +128,7 @@ class SMMAdaptiveMetropolis:
                  epsilon: float = 0.01, 
                  custom_proposal_dists=None, 
                  proposal_strategy="adaptive",
-                 random_seed: int = 42):
+                 random_seed: int = None):
         """
         Initialize the SMM Adaptive Metropolis estimator.
         
@@ -148,6 +164,7 @@ class SMMAdaptiveMetropolis:
             
         if parameter_bounds is None:
             self.parameter_bounds = [
+                # Below, it's set up to change when new parameters are changed
                 (1, 100),      # Delta
                 (-4, 1),     # rho_1 (right now rho_val)
                 (-4, 1),     # rho_2 (right now rho_e_val)
@@ -181,7 +198,8 @@ class SMMAdaptiveMetropolis:
 
         # Random state (in case we want to replicate analysis)
         self.random_seed = random_seed
-        np.random.seed(random_seed)
+        if random_seed != None: 
+            np.random.seed(random_seed)
         
         # Load or generate empirical moments
         # NOTE: once we have empirical moments, these lines need to be changed
@@ -314,7 +332,7 @@ class SMMAdaptiveMetropolis:
         # NOTE: self.covariance_matrix is equivalent to C_t in Haario et al. (2001)
         self.covariance_matrix = scaling_parameter * cov + scaling_parameter * self.epsilon * np.eye(d)
     
-    # TODO: check this function in more detail
+    # TODO: check this function in more detail and make sure it's in line with Haario et al. (2001)
     def _should_increase_households(self) -> bool:
         """Determine if household count should be increased."""
         if (self.num_current_households >= self.num_max_households or 
@@ -1171,7 +1189,7 @@ if __name__ == "__main__":
     # Initialize estimator
     estimator = SMMAdaptiveMetropolis(
         initial_params=INITIAL_PARAMS,
-        random_seed=42, 
+        random_seed=RANDOM_SEED, 
         initial_households=INITIAL_HOUSEHOLDS, 
         max_households=MAX_HOUSEHOLDS,
         household_increase_threshold=HOUSEHOLD_INCREASE_THRESHOLD, 

@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/bin/bash
 """
 Bijan Taheri (O'Connell Lab)
 Summer 2025
@@ -20,18 +20,16 @@ NOTES FOR USING FIREBIRD:
 To test when submitted bash script will run: 
 squeue --start -j <jobid>
 
-
 To test bash script BEFORE submission (time): 
 sbatch --test-only myscript.sh
 
 To allocate a node to play around with Firebird a bit
 salloc -t 60 --cpus-per-task=1 --mem-per-cpu=32gb --partition=unowned
 
-
 Don't use base environment, create conda env
 
 
-NOTE: a conda environment exists for this code (and the adaptive Metropolis code)
+
 
 
 Dependencies: 
@@ -41,6 +39,8 @@ Dependencies:
 """
 # TODO: figure out exactly why solve_system.py is failing at some points (i.e., failing to find a solution)
 # TODO: see if we can edit Nelder-Mead simplex to cover entire parameter space
+# TODO: look into Del Boca code and see how they make SMM so efficient (is it just different equations, or something else?)
+# TODO: try different solvers for minimization
 
 # Imports
 import numpy as np
@@ -137,23 +137,15 @@ parameters_to_optimize = [20, -0.2,-0.2,0.3, 0.2, 0.2]
 
 times_elapsed = []
 
-# TODO: look into Del Boca code and see how they make SMM so efficient (is it just different equations, or something else?)
-# TODO: try different solvers for minimization
-# TODO: look into JAX
+
+
 # ----------------- FUNCTIONS ---------------------
 
 # A function to load the latent factors from a file
 def load_latent_factors(filepath): 
-    # Random parameters, since we don't have any data
-    # TODO: replace
-    means_leisure = [2, 1, 2, 3]
-    stds_leisure = [0.5, 0.2, 0.5, 0.5]
-    means_parental_investment = [5, 4, 3, 2]
-    stds_parental_investment = [1, 0.5, 0.3, 0.2]
-    means_child_hc = [2, 3, 4, 5]
-    stds_child_hc = [0.5, 1, 1.5, 2]
-
-    return list(itertools.chain(means_leisure, means_parental_investment, means_child_hc, stds_leisure, stds_parental_investment, stds_child_hc))
+    # TODO: write this function
+    print("Warning: no code exists for loading latent factors.")
+    return
 
 
 # A function to create the households, based on Michael's specification

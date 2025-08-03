@@ -16,6 +16,7 @@ chmod +x "adaptive_metropolis.py"
 chmod +x "Del_Boca_Implementation.py"
 chmod +x "solve_system.py"
 
+conda activate oconnelllab
 
 ## Set the value of BIGSCRATCH to 'true' if your job is
 ## anticipated to require more than a few hundred gigabytes
