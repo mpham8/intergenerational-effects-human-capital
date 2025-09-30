@@ -25,7 +25,7 @@ V33 = STUDENT POPULATION (ENROLLMENT)
 cpi_data = pd.read_csv("C:/Users/kahna/Dropbox/OConnell 2025 Research/CPI Data/Processed_CPI_Data.csv")
 
 # Load NCES data files for each year
-year_range = range(1990, 2023)
+year_range = range(1995, 2023)
 all_years = []
 
 for year in year_range:
@@ -114,8 +114,30 @@ real_data = pd.merge(aggregated, cpi_data, on=['Year', 'Region'], how='left')
 real_data['real_TCURELSC_per_student'] = 313.7 * real_data['TCURELSC_per_student'] / real_data['Annual_CPI']
 
 
+############### Extrapolate Backwards for Years 1990-1995 ###############
 
-############### Interpolate Missing Years (Mainly 1991-1994 inclusive) ###############
+"""
+The extrapolation is done using growth rates from 1990-1995 of official NCES national expenditures per student data (2002 dollars)
+Data from later years is also used for FIPS values in which there is no value for 1995 and 1996
+1990: $6,516
+1991: $6,522
+1992: $6,476
+1993: $6,450
+1994: $6,492
+1995: $6,550
+1996: $6,561
+1997: $6,642
+"""
+# Define the growth rates (negative means decrease from previous year)
+growth_rates = {
+    1996: 0.0123,  # 1.23%
+    1995: 0.0017,  # 0.17%
+    1994: 0.0089,  # 0.89%
+    1993: 0.0065,  # 0.65%
+    1992: -0.0040, # -0.40%
+    1991: -0.0073, # -0.73%
+    1990: -0.0009  # -0.09%
+}
 
 #Create complete index with all FIPS-year combinations
 all_fips = real_data['FIPS'].unique()
@@ -134,60 +156,148 @@ missing_by_fips = complete_data.groupby('FIPS')['TCURELSC_per_student'].apply(
     lambda x: x.isna().sum()
 ).reset_index(name = 'Missing_Years')
 
-# Filter complete_data to only include FIPS codes with 5 or fewer missing years
-filtered_fips = missing_by_fips[missing_by_fips['Missing_Years'] <= 5]['FIPS']
+# Filter complete_data to only include FIPS codes with 10 or fewer missing years
+filtered_fips = missing_by_fips[missing_by_fips['Missing_Years'] <= 10]['FIPS']
 complete_data = complete_data[complete_data['FIPS'].isin(filtered_fips)]
+complete_data = complete_data.sort_values(['FIPS', 'Year'])
 
-interpolated_data = complete_data.copy()
 
-# Sort by FIPS and Year to ensure proper interpolation order
-interpolated_data = interpolated_data.sort_values(['FIPS', 'Year'])
+extrapolated_data = complete_data.copy()
 
-# Perform interpolation for each FIPS group separately
-interpolated_list = []
+# Perform backwards extrapolation for each FIPS group separately
+extrapolated_list = []
 
-for fips in interpolated_data['FIPS'].unique():
-    fips_data = interpolated_data[interpolated_data['FIPS'] == fips].copy()
+for fips in extrapolated_data['FIPS'].unique():
+    fips_data = extrapolated_data[extrapolated_data['FIPS'] == fips].copy()
     
-    # Interpolate missing values linearly
-    fips_data['real_TCURELSC_per_student'] = fips_data['real_TCURELSC_per_student'].interpolate(
-        method='linear',
-        limit_direction='forward'  # Only interpolate between existing values
-    )
+    # Work backwards from 1996 to 1990
+    for year in range(1996, 1989, -1):  # 1996, 1995, 1994, 1993, 1992, 1991, 1990
+        current_row = fips_data[fips_data['Year'] == year]
+        next_year_row = fips_data[fips_data['Year'] == year + 1]
+        
+        # Check if current year is missing and next year exists
+        if (pd.isna(current_row['real_TCURELSC_per_student'].iloc[0]) and
+            pd.notna(next_year_row['real_TCURELSC_per_student'].iloc[0])):
+            
+            # Calculate the value using backwards growth rate
+            next_year_value = next_year_row['real_TCURELSC_per_student'].iloc[0]
+            growth_rate = growth_rates[year]
+            
+            current_year_value = next_year_value / (1 + growth_rate)
+            
+            # Update the value
+            fips_data.loc[fips_data['Year'] == year, 'real_TCURELSC_per_student'] = current_year_value
+            
+            print(f"FIPS {fips}, Year {year}: Extrapolated {current_year_value:.2f} from {year+1} value {next_year_value:.2f} using growth rate {growth_rate:.4f}")
     
-    interpolated_list.append(fips_data)
+    extrapolated_list.append(fips_data)
 
 # Combine all FIPS data back together
-interpolated_data = pd.concat(interpolated_list, ignore_index=True)
+extrapolated_data = pd.concat(extrapolated_list, ignore_index=True)
 
 
-#Plot complete_data vs interpolated_data for five random values of FIPS
-random_fips = np.random.choice(interpolated_data['FIPS'].unique(), 5, replace=False)
+############### Remove FIPS Values with more than 10 years of being an outlier ###############
+
+# Calculate mean and standard deviation for real_TCURELSC_per_student for each year
+yearly_stats = extrapolated_data.groupby('Year')['real_TCURELSC_per_student'].agg(['mean', 'std']).reset_index()
+yearly_stats.columns = ['Year', 'mean', 'std']
+
+# Create a dictionary for faster lookup
+yearly_stats_dict = {
+    int(row['Year']): {
+        'mean': float(row['mean']),
+        'std': float(row['std'])
+    }
+    for _, row in yearly_stats.iterrows()
+}
+
+# Function to check if value is an outlier (3+ standard deviations away)
+def is_outlier(value, year_stats):
+    if pd.isna(value):
+        return False
+    z_score = abs(value - year_stats['mean']) / year_stats['std']
+    return z_score >= 3
+
+# Count outlier years for each FIPS
+fips_outlier_counts = {}
+
+for fips in extrapolated_data['FIPS'].unique():
+    fips_data = extrapolated_data[extrapolated_data['FIPS'] == fips]
+    outlier_count = 0
+    
+    for _, row in fips_data.iterrows():
+        year = int(row['Year'])
+        value = row['real_TCURELSC_per_student']
+        
+        if year in yearly_stats_dict and pd.notna(value):
+            if is_outlier(value, yearly_stats_dict[year]):
+                outlier_count += 1
+    
+    fips_outlier_counts[fips] = outlier_count
+
+# Identify FIPS codes with 10 or more outlier years
+outlier_fips = [fips for fips, count in fips_outlier_counts.items() if count >= 10]
+print("The list of outliers:", outlier_fips)
+
+# Remove FIPS codes with 10 or more outlier years that aren't one of the 100 wealthiest counties in the U.S.
+rich_counties = {'06003', '08053', '34003', '34013', '36059',
+                 '36079', '36087', '36103', '48033', '48269',
+                 '51013'}
+filtered_data = extrapolated_data[
+    (~extrapolated_data['FIPS'].isin(outlier_fips)) | 
+    (extrapolated_data['FIPS'].isin(rich_counties))
+]
+
+
+print(f"Removed {len(outlier_fips)} FIPS codes for being outliers")
+
+# Create a histogram showing distribution of outlier years
+outlier_counts = list(fips_outlier_counts.values())
+
+plt.figure(figsize=(12, 6))
+plt.hist(outlier_counts, bins=range(1, max(outlier_counts) + 2), alpha=0.7, 
+         color='skyblue', edgecolor='black')
+plt.axvline(x=10, color='red', linestyle='--', linewidth=2, 
+           label='Removal threshold (10 years)')
+plt.xlabel('Number of Outlier Years per FIPS')
+plt.ylabel('Number of FIPS Codes')
+plt.title('Distribution of Outlier Years per FIPS Code')
+plt.legend()
+plt.grid(axis='y', alpha=0.3)
+plt.show()
+
+# Update the final_data to use filtered data
+final_data = filtered_data[['FIPS', 'Year', 'student_pop', 'real_TCURELSC_per_student']]
+
+
+
+############### Save Data ###############
+
+#Plot complete_data vs extrapolated_data for five random values of FIPS
+random_fips = np.random.choice(extrapolated_data['FIPS'].unique(), 5, replace=False)
 
 for fips in random_fips:
     fips_data = complete_data[complete_data['FIPS'] == fips]
-    fips_interpolated = interpolated_data[interpolated_data['FIPS'] == fips]
+    fips_extrapolated = extrapolated_data[extrapolated_data['FIPS'] == fips]
     
     plt.plot(fips_data['Year'], fips_data['real_TCURELSC_per_student'], marker='o', label=f'Original {fips}')
-    plt.plot(fips_interpolated['Year'], fips_interpolated['real_TCURELSC_per_student'], marker='x', linestyle='--', label=f'Interpolated {fips}')
+    plt.plot(fips_extrapolated['Year'], fips_extrapolated['real_TCURELSC_per_student'], marker='x', linestyle='--', label=f'Extrapolated {fips}')
 
-    plt.title('Complete Data vs Interpolated Data')
+    plt.title('Original Data vs Extrapolated Data')
     plt.xlabel('Year')
     plt.ylabel('TCURELSC per Student')
     plt.legend()
     plt.show()
 
 
-
-final_data = interpolated_data[['FIPS', 'Year', 'student_pop','real_TCURELSC_per_student']]
-
+final_data = extrapolated_data[['FIPS', 'Year', 'student_pop','real_TCURELSC_per_student']]
 
 
 # Save descriptive statistics by year
 descriptive_stats = final_data.describe()
 descriptive_stats.to_csv('Final_NCES_Data_Descriptive_Statistics.csv')
 
-final_data.to_csv('Final_Interpolated_NCES_Data.csv', index=False)
+final_data.to_csv('Final_Extrapolated_NCES_Data.csv', index=False)
 
 
 # Save descriptive statistics by year
