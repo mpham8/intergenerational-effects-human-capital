@@ -48,10 +48,20 @@ include("Julia_DelBoca_Implementation_Rev2.jl")
 # Model
 const NUM_PERIODS = 3
 const NUM_MOMENTS = 18
+const NUM_PARAMETERS = 6
+const HOUSEHOLD_COLUMN_NAMES = [
+    "Parent Human Capital",
+    "Wage Rate Trajectory",
+    "Government Inputs",
+    "Optimal Leisure",
+    "Optimal Consumption",
+    "Optimal Parental Investment",
+    "Child Human Capital"
+]
 
 # MCMC
 const INITIAL_PARAMS = [10, -0.3, -0.1, 0.4, 0.15, 0.1] # close, but not equal to 'empirical' params
-const INITIAL_HOUSEHOLDS = 1000 # number of households starting off
+const INITIAL_HOUSEHOLDS = 100 # number of households starting off
 const MAX_HOUSEHOLDS = 10000 # maximum number of households reached
 const HOUSEHOLD_INCREASE_THRESHOLD = 0.03 # when the number of households are increased
 const ADAPTATION_START_TIME = 1000 # time after which adaptive covariance starts 
@@ -309,9 +319,11 @@ function generate_placeholder_empirical_moments(initial_households::Int, rng::Ab
     
     # Averaging over multiple simulations of parameters
     empirical_moments_list = Vector{Vector{Float64}}()
-    for _ in 1:10 # Increase the number of loops for greater accuracy of "empirical" parameters
+    for _ in 1:2 # Increase the number of loops for greater accuracy of "empirical" parameters
         households_empirical = create_households(initial_households)
         solved_households = solve_households(copy(households_empirical), parameters_to_optimize)
+        # print("Here are the empirical solved households: ")
+        # println(solved_households)
         push!(empirical_moments_list, moments(solved_households))
     end
     empirical = mean(empirical_moments_list)
@@ -363,14 +375,18 @@ function compute_smm_objective(estimator::SMMAdaptiveMetropolis, params::Vector{
     # Calculate simulated moments, using the same households every time
     # NOTE: using the same households every time is based on this article: https://opensourceecon.github.io/CompMethods/struct_est/SMM.html
     solved_households = solve_households(estimator.simulated_households, params)
+    if solved_households == NaN
+        println("WARNING: households were not solved properly")
+    end
     simulated_moments = moments(solved_households)
+
     
     # Moment differences
     # NOTE: moments should always be POSITIVE. If moments are not positive, this line may not work
+    # TO DEBUG NAN SMM OBJECTIVE - FIGURE OUT IF MEAN OR STD IS NAN FOR SOME VALUES
     moment_diff = (simulated_moments .- estimator.empirical_moments) ./ estimator.empirical_moments
+    smm_obj = transpose(moment_diff) * estimator.weighting_matrix * moment_diff
     
-    # Standard SMM objective
-    smm_obj = moment_diff' * estimator.weighting_matrix * moment_diff
     
     return smm_obj
 end
@@ -421,7 +437,11 @@ function should_increase_households(estimator::SMMAdaptiveMetropolis)
     
     # Check if parameter standard deviations have stabilized
     recent_stds = estimator.parameter_std_history[end-4:end]
-    std_of_stds = std(recent_stds, dims=1)
+    # Turning recent_stds from Vector{Vector{::Float64}} to an array (which is needed to do stds)
+    recent_stds = hcat(recent_stds...)
+    # Computing stds
+    std_of_stds = std(recent_stds)
+    
     mean_std_change = mean(std_of_stds)
     
     return mean_std_change < estimator.household_increase_threshold
@@ -595,6 +615,7 @@ function run_mcmc!(estimator::SMMAdaptiveMetropolis;
             
             if rand(estimator.rng) < alpha
                 # Accept proposal
+                println("We finally accepted a proposal!")
                 current_params = copy(proposal)
                 current_smm = proposal_smm
                 push!(estimator.accepted_chain, current_params)
@@ -1380,6 +1401,7 @@ end
 # =============================================================================
 
 function main()
+    sleep(1)  # Small delay to ensure print order in some environments
     
     # Initialize estimator
     estimator = SMMAdaptiveMetropolis(
@@ -1393,7 +1415,25 @@ function main()
         proposal_strategy=PROPOSAL_STRATEGY,
         custom_proposal_dists=PROPOSAL_DISTS,
     )
+
+    # Run some experiments
+    households = create_households(100)
+    for i = 1:5
+        println("Household ", i, ": ", repr("text/plain", households[i, :, :]))
+    end
+    households = solve_households(households, parameters_to_optimize)
+    for i = 1:5
+        println("Household ", i, ": ", repr("text/plain", households[i, :, :]))
+    end
+
+    println("MEANS OF HOUSEHOLDS BY COLUMN:")
+    means = mean(households, dims=1)  # means is 1 x NUM_PERIODS x NUM_PARAMETERS
+    means = dropdims(means, dims=1)   # now NUM_PERIODS x NUM_PARAMETERS
+    for i = 1:7
+        println(HOUSEHOLD_COLUMN_NAMES[i], ": ", means[:, i])
+    end
     
+        
     # Run two-step SMM
     results = run_two_step_smm!(estimator,
         stage1_iterations=STAGE1_ITERATIONS,  # Reduced for example

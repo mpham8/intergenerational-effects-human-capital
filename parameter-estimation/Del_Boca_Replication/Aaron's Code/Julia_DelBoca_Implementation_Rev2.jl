@@ -9,7 +9,7 @@ using Distributed
 using CSV
 using DataFrames
 using .Threads
-include("Julia_solve_system_test3.jl")
+include("Julia_solve_system_3period.jl")
 
 # ---------------- CONSTANTS ------------------
 # General
@@ -131,7 +131,7 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
     """
     if num_workers <= 0
         num_workers = max(1, Sys.CPU_THREADS ÷ NUM_CHAINS) # Divides by number of chains in adaptive metropolis
-        println("Number of workers: ", num_workers)
+        # println("Number of workers: ", num_workers)
     end
     results = Vector{Array{Float64, 2}}(undef, size(households, 1))
 
@@ -158,6 +158,18 @@ function moments(households::Array{Float64, 3})::Vector{Float64}
         moments[i + 3*NUM_PERIODS] = std(households[:, i, moment_leisure])
         moments[i + 4*NUM_PERIODS] = std(households[:, i, moment_expenditure])
         moments[i + 5*NUM_PERIODS] = std(households[:, i, moment_child_hc])
+    end
+    
+    for i in 1:NUM_MOMENTS
+        if moments[i] == 0
+            # # FOR DEBUGGING PURPOSES
+            # println("WARNING: moment # ", i, " is 0. ")
+            # println("Here is a sample of households: ")
+            # for i = 1:1
+            #     println("Household ", i, ": ", repr("text/plain", households[i, :, :]))
+            # end
+            # println("This may cause problems for evaluating the SMM function.")
+        end
     end
 
     return moments
