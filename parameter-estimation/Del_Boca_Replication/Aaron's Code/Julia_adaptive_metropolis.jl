@@ -229,7 +229,7 @@ function SMMAdaptiveMetropolis(;
         # (0.0, 1.0),        # omega_3^h
     ])
     
-    init_params = something(initial_params, [19.5, -0.25, -0.18, 0.28, 0.22, 0.18])
+    init_params = something(initial_params, [10, -0.29, -0.11, 0.41, 0.16, 0.11])
     
     # Initialize random state
     rng = if random_seed !== nothing 
@@ -1417,14 +1417,33 @@ function main()
     )
 
     # Run some experiments
-    households = create_households(100)
+    unsolved_households = create_households(100)
     for i = 1:5
-        println("Household ", i, ": ", repr("text/plain", households[i, :, :]))
+        println("Household ", i, ": ", repr("text/plain", unsolved_households[i, :, :]))
     end
-    households = solve_households(households, parameters_to_optimize)
-    for i = 1:5
-        println("Household ", i, ": ", repr("text/plain", households[i, :, :]))
+    # Testing household solver with a variety of parameters
+    for i = 1:10
+        parameters_random = propose_custom_parameters(
+            INITIAL_PARAMS,
+            estimator.parameter_names,
+            estimator.custom_proposal_dists,
+            estimator.rng
+        )
+        households = solve_households(unsolved_households, parameters_random)
+
+        # Print a random household
+        println("Parameter Set ", i, ": ", repr("text/plain", parameters_random))
+        for j = 1:2
+            household_idx = rand(1:size(households, 1))
+            println("  Household ", household_idx, ": ", repr("text/plain", households[household_idx, :, :]))
+        end
     end
+    households = solve_households(unsolved_households, INITIAL_PARAMS)
+
+    # for i = 1:5
+    #     println("Household ", i, ": ", repr("text/plain", households[i, :, :]))
+    # end
+    exit()
 
     println("MEANS OF HOUSEHOLDS BY COLUMN:")
     means = mean(households, dims=1)  # means is 1 x NUM_PERIODS x NUM_PARAMETERS
