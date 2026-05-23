@@ -12,6 +12,7 @@ method of moments, specifically calculating wage and government input trajectori
 * IMPORT
 import delimited "data-preprocessing/Processed_Data/child_period_panel_BEST.csv", clear
 keep if period >= 0
+keep if period != 3
 
 ****************************************************
 * RENAMING VARIABLES
@@ -26,11 +27,7 @@ rename mother_age age
 ****************************************************
 xtset id period
 
-****************************************************
-* (OPTIONAL) KEEP INDIVIDUALS WITH >= 3 PERIODS
-****************************************************
-bysort id: gen T_i = _N
-keep if T_i >= 3
+
 
 ****************************************************
 * 1) AR(1) PROCESS FOR INCOME
@@ -43,7 +40,7 @@ reg income L_income
 ****************************************************
 
 * Log income
-drop if income <= 0
+replace income = 0.001 if income == 0
 gen ln_income = ln(income)
 
 * Lags

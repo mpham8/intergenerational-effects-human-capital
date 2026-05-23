@@ -64,6 +64,7 @@ SHORTEN_DATA = False # NOTE: only edit this line of code if you are looking to r
 NUMBER_OF_ROWS_TESTING = 500 # only relevant if shortening the data for testing purposes
 PREBIRTH_AGES_PER_CHILD = 2 # determining how many pre-birth ages I want to keep (to backfill in case -1 is unavailable)
 OUTLIER_THRESHOLD = 3 # the number of standard deviations outside of which we throw away the data. Enter "None" to have no threshold
+# TODO: run with no outlier threshold
 
 # Defining terms for rescaling data
 # The following terms appear in multiple-choice questions for the NLSY79 data. These numbers represent subjective quantitative estimates for those terms
@@ -553,18 +554,7 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
             new_data[column_name] = new_data['MPUBID_XRND'].map(mother_map)
     
 
-    # Removing all outliers from the current data if we have an outlier threshold set
-    if OUTLIER_THRESHOLD is not None: 
-        print("Removing outliers from the data...")
-        # Defining the columns to check for outliers
-        # MOM_HELPS_CH_LEARN columns are binary and act weirdly when checking for outliers, so don't check them
-        columns_to_check = [col for col in new_data.columns if col not in ['id', 'age', 'year', 'MOM_HELPS_CH_LEARN_NUMBERS', 'MOM_HELPS_CH_LEARN_ALPHABET', 'MOM_HELPS_CH_LEARN_COLORS', 'MOM_HELPS_CH_LEARN_SHAPES']]
-        new_data = remove_outliers(new_data, columns_to_check, threshold=OUTLIER_THRESHOLD)
-
-        print("Outliers removed. Here is the new data:")
-        print(new_data.head())
-    else: 
-        print("Skipping removal of outliers")
+    
 
     # Adding "Number of Older Siblings" and "Number of Children" columns using child IDs and mother IDs
     for child_id in nls_data['id'].unique(): 
@@ -651,6 +641,19 @@ def create_child_by_age_panel(nls_data: pd.DataFrame) -> pd.DataFrame:
                 axis=1
             )
 
+
+    # Removing all outliers from the current data if we have an outlier threshold set
+    if OUTLIER_THRESHOLD is not None: 
+        print("Removing outliers from the data...")
+        # Defining the columns to check for outliers
+        # MOM_HELPS_CH_LEARN columns are binary and act weirdly when checking for outliers, so don't check them
+        columns_to_check = [col for col in new_data.columns if col not in ['id', 'age', 'year', 'MOM_HELPS_CH_LEARN_NUMBERS', 'MOM_HELPS_CH_LEARN_ALPHABET', 'MOM_HELPS_CH_LEARN_COLORS', 'MOM_HELPS_CH_LEARN_SHAPES']]
+        new_data = remove_outliers(new_data, columns_to_check, threshold=OUTLIER_THRESHOLD)
+
+        print("Outliers removed. Here is the new data:")
+        print(new_data.head())
+    else: 
+        print("Skipping removal of outliers")
 
     # Filter out rows where age > 19 and age < -1 (age -1 is the pre-birth age)
     # NOTE: if you want to change the age range, you need to modify this line
