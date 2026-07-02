@@ -1,22 +1,21 @@
-# Standalone parent policy solver for equations 4.2.1.27-31.
+# Standalone parent policy solver for the Pham-OC project.
 #
-# This file intentionally uses no external Julia packages. The parent policy
-# problem is solved with a small custom bounded optimizer so the file can be run
-# directly with:
+# This version distinguishes the technology parents use to think about the
+# production of child human capital from the true technology that determines the
+# state observed at the start of the next period.
 #
-#  
+# Key modeling choices implemented here:
+# - Parents enter each period observing the true child human capital state.
+# - Parent choices are solved on a 2D state grid: child human capital and parent
+#   human capital.
+# - The continuation state is rolled forward using the true production function
+#   and a multiplicative lognormal shock integrated by Gauss-Hermite quadrature.
+# - The perceived production function is also evaluated and returned so the
+#   wedge between perceived and true child human capital can be inspected.
 #
-# The human-capital productivity shock is fixed at epsilon = 1 inside the policy
-# solver. If a later simulation needs realized stochastic child human capital,
-# apply those shocks after computing the parent policy rules.
+# No external Julia packages are required.
 
 
-"""
-    as_period_vector(x, periods)
-
-Return `x` as a vector with one value per parent period. Scalars are repeated;
-vectors are copied as floating-point arrays.
-"""
 function as_period_vector(x, periods::Int)
     if x isa Number
         return fill(Float64(x), periods)
@@ -27,17 +26,6 @@ function as_period_vector(x, periods::Int)
 end
 
 
-"""
-    crra_utility(c, labor, eta, gamma)
-
-CRRA utility over the composite `c * (1 - labor)^gamma`.
-
-This corresponds to:
-
-    u(c, 1-l) = ((c * (1-l)^gamma)^(1-eta) - 1) / (1-eta)
-
-with the log utility limit when `eta` is approximately 1.
-"""
 function crra_utility(c::Float64, labor::Float64, eta::Float64, gamma::Float64)
     if c <= 0.0 || labor < 0.0 || labor >= 1.0
         return -Inf
@@ -56,21 +44,14 @@ end
 
 
 """
-    perceived_hc_next(hc, e, g, A, theta_h, theta_e, theta_g, rho; min_input)
+    hc_production(hc, e, g, A, theta_h, theta_e, theta_g, rho; min_input)
 
-Perceived human-capital production function used by parents.
+CES human-capital production. The same function is used for both perceived and
+true technologies; the caller passes the relevant parameter vector.
 
-For general `rho`, this is the CES form:
-
-    hc' = A * (theta_h * hc^rho + theta_e * e^rho + theta_g * g^rho)^(1/rho)
-
-When `rho` is close to zero, the function uses the Cobb-Douglas limit:
-
-    hc' = A * hc^theta_h * e^theta_e * g^theta_g
-
-The productivity shock is deterministic here: epsilon = 1.
+For rho close to zero, this uses the Cobb-Douglas limit.
 """
-function perceived_hc_next(
+function hc_production(
     hc::Float64,
     e::Float64,
     g::Float64,
@@ -97,12 +78,6 @@ function perceived_hc_next(
 end
 
 
-"""
-    linear_interp(x_grid, y_grid, x)
-
-Simple linear interpolation with linear extrapolation at the endpoints. This is
-used for the continuation value V_{t+1}(hc').
-"""
 function linear_interp(x_grid::Vector{Float64}, y_grid::Vector{Float64}, x::Float64)
     n = length(x_grid)
 
@@ -127,18 +102,41 @@ end
 
 
 """
-    golden_maximize(f, left, right; tolerance, max_iter)
+    normal_quadrature(n, sigma)
 
-Maximize a single-variable function on a closed interval using golden-section
-search. This is the one-dimensional building block for the coordinate optimizer.
+Return nodes and probabilities for z ~ N(0, 1), plus multiplicative shocks
+epsilon = exp(sigma*z). The nodes are Gauss-Hermite nodes transformed from the
+exp(-x^2) convention to the standard-normal convention.
+
+Supported n values are 5 and 7, matching the 5-7 shock-node guidance.
 """
-function golden_maximize(
-    f,
-    left::Float64,
-    right::Float64;
-    tolerance::Float64 = 1e-8,
-    max_iter::Int = 200,
-)
+function normal_quadrature(n::Int, sigma::Float64)
+    if n == 5
+        hermite_nodes = [-2.0201828704560856, -0.9585724646138185, 0.0,
+                          0.9585724646138185, 2.0201828704560856]
+        hermite_weights = [0.01995324205904591, 0.3936193231522412,
+                           0.9453087204829419, 0.3936193231522412,
+                           0.01995324205904591]
+    elseif n == 7
+        hermite_nodes = [-2.6519613568352334, -1.6735516287674714,
+                         -0.8162878828589647, 0.0, 0.8162878828589647,
+                          1.6735516287674714, 2.6519613568352334]
+        hermite_weights = [0.000971781245099519, 0.054515582819127,
+                           0.4256072526101278, 0.8102646175568073,
+                           0.4256072526101278, 0.054515582819127,
+                           0.000971781245099519]
+    else
+        error("quadrature_n must be 5 or 7.")
+    end
+
+    z_nodes = sqrt(2.0) .* hermite_nodes
+    probs = hermite_weights ./ sqrt(pi)
+    eps_nodes = exp.(sigma .* z_nodes)
+    return eps_nodes, probs
+end
+
+
+function golden_maximize(f, left::Float64, right::Float64; tolerance::Float64 = 1e-8, max_iter::Int = 200)
     if right <= left
         return left, f(left)
     end
@@ -179,18 +177,6 @@ function golden_maximize(
 end
 
 
-"""
-    coordinate_maximize(objective, l_start, e_start, max_l, max_e, resources_fn; ...)
-
-Maximize the two-choice parent objective over labor and investment. The budget
-constraint is handled by limiting the feasible investment interval for each
-labor choice:
-
-    e <= (1 - tau_t) * w_t * h * l + T_t - min_c
-
-The optimizer alternates between maximizing over `e` given `l` and maximizing
-over `l` given `e`.
-"""
 function coordinate_maximize(
     objective,
     l_start::Float64,
@@ -205,7 +191,6 @@ function coordinate_maximize(
 )
     l = clamp(l_start, 0.0, max_l)
     e = clamp(e_start, min_e, min(max_e, resources_fn(l) - min_c))
-
     if e < min_e
         e = min_e
     end
@@ -218,10 +203,9 @@ function coordinate_maximize(
         end
         e, _ = golden_maximize(e_choice -> objective(l, e_choice), min_e, e_hi; tolerance=tolerance)
 
-        l_min_for_e = 0.0
         l, _ = golden_maximize(
             l_choice -> resources_fn(l_choice) - min_c >= e ? objective(l_choice, e) : -Inf,
-            l_min_for_e,
+            0.0,
             max_l;
             tolerance=tolerance,
         )
@@ -238,52 +222,67 @@ end
 
 
 """
-    compute_parent_policy(...; keyword arguments...)
+    compute_parent_policy(...)
 
-Solve the three-period parent dynamic optimization problem.
+Solve parent policy on a 2D state grid over current child human capital and
+parent human capital.
 
-Required inputs:
-- `hc_grid`: grid for current child human capital.
-- `h`: parent human capital.
-- `wages`, `transfers`, `public_inputs`: scalar or length-`periods` vectors.
-- `theta_h`, `theta_e`, `theta_g`, `rho`, `d`: perceived production parameters,
-  each scalar or length-`periods` vector.
+The policy objective rolls the next-period state forward using the true
+production function and multiplicative lognormal shocks. This matches the story
+that parents observe the child's realized human capital before making the next
+period's decision. The perceived production function is still evaluated and
+returned so the implied perceived/true wedge can be inspected.
 
-Keyword inputs include `beta`, `eta`, `gamma`, `b`, and `tau`. The function
-returns policy and value arrays with shape `(periods, length(hc_grid))`.
+Returned arrays have shape:
+
+    periods × length(hc_grid) × length(parent_h_grid)
 """
 function compute_parent_policy(
     hc_grid,
-    h,
+    parent_h_grid,
     wages,
     transfers,
     public_inputs,
-    theta_h,
-    theta_e,
-    theta_g,
-    rho,
-    d;
+    perceived_theta_h,
+    perceived_theta_e,
+    perceived_theta_g,
+    perceived_rho,
+    perceived_d,
+    true_theta_h,
+    true_theta_e,
+    true_theta_g,
+    true_rho,
+    true_d;
     beta::Float64,
     eta::Float64,
     gamma::Float64,
-    b::Float64,
+    b,
     tau,
+    sigma_h::Float64,
     controls = nothing,
     x_coeffs = nothing,
     min_c::Float64 = 1e-8,
     min_e::Float64 = 0.0,
     periods::Int = 3,
+    quadrature_n::Int = 7,
     tolerance::Float64 = 1e-8,
 )
     hc_grid = Float64.(collect(hc_grid))
+    parent_h_grid = Float64.(collect(parent_h_grid))
     wages = as_period_vector(wages, periods)
     transfers = as_period_vector(transfers, periods)
     public_inputs = as_period_vector(public_inputs, periods)
-    theta_h = as_period_vector(theta_h, periods)
-    theta_e = as_period_vector(theta_e, periods)
-    theta_g = as_period_vector(theta_g, periods)
-    rho = as_period_vector(rho, periods)
-    d = as_period_vector(d, periods)
+    perceived_theta_h = as_period_vector(perceived_theta_h, periods)
+    perceived_theta_e = as_period_vector(perceived_theta_e, periods)
+    perceived_theta_g = as_period_vector(perceived_theta_g, periods)
+    perceived_rho = as_period_vector(perceived_rho, periods)
+    perceived_d = as_period_vector(perceived_d, periods)
+    true_theta_h = as_period_vector(true_theta_h, periods)
+    true_theta_e = as_period_vector(true_theta_e, periods)
+    true_theta_g = as_period_vector(true_theta_g, periods)
+    true_rho = as_period_vector(true_rho, periods)
+    true_d = as_period_vector(true_d, periods)
+    b = as_period_vector(b, periods)
     tau = as_period_vector(tau, periods)
 
     if controls === nothing || x_coeffs === nothing
@@ -298,109 +297,142 @@ function compute_parent_policy(
         x_beta = controls_matrix * coeffs
     end
 
+    eps_nodes, eps_probs = normal_quadrature(quadrature_n, sigma_h)
+
     n_hc = length(hc_grid)
-    c_policy = fill(NaN, periods, n_hc)
-    l_policy = fill(NaN, periods, n_hc)
-    e_policy = fill(NaN, periods, n_hc)
-    hc_next_policy = fill(NaN, periods, n_hc)
-    value_policy = fill(-Inf, periods, n_hc)
+    n_parent = length(parent_h_grid)
+    c_policy = fill(NaN, periods, n_hc, n_parent)
+    l_policy = fill(NaN, periods, n_hc, n_parent)
+    e_policy = fill(NaN, periods, n_hc, n_parent)
+    perceived_hc_next_policy = fill(NaN, periods, n_hc, n_parent)
+    true_expected_hc_next_policy = fill(NaN, periods, n_hc, n_parent)
+    value_policy = fill(-Inf, periods, n_hc, n_parent)
 
-    # Backward induction over parent periods. The final period values terminal
-    # child human capital directly; earlier periods use interpolated continuation
-    # values from the next-period value function.
     for t in periods:-1:1
-        for ih in 1:n_hc
-            hc0 = hc_grid[ih]
-            A = exp(d[t] + x_beta[t])
-            max_l = 1.0 - min_c
+        perceived_A = exp(perceived_d[t] + x_beta[t])
+        true_A = exp(true_d[t] + x_beta[t])
 
-            resources(labor) = (1.0 - tau[t]) * wages[t] * Float64(h) * labor + transfers[t]
-            max_resources = resources(max_l)
-            max_e = max(min_e, max_resources - min_c)
+        for ip in 1:n_parent
+            parent_h = parent_h_grid[ip]
 
-            function objective(labor, investment)
-                c = resources(labor) - investment
-                if c <= min_c || investment < min_e || labor < 0.0 || labor >= 1.0
-                    return -Inf
+            for ih in 1:n_hc
+                hc0 = hc_grid[ih]
+                max_l = 1.0 - min_c
+
+                resources(labor) = (1.0 - tau[t]) * wages[t] * parent_h * labor + transfers[t]
+                max_resources = resources(max_l)
+                max_e = max(min_e, max_resources - min_c)
+
+                function expected_continuation(hc_true_det)
+                    expected_value = 0.0
+                    for q in eachindex(eps_nodes)
+                        hc_realized = hc_true_det * eps_nodes[q]
+                        if t == periods
+                            expected_value += eps_probs[q] * log(max(hc_realized, 1e-12))
+                        else
+                            continuation = linear_interp(hc_grid, vec(value_policy[t + 1, :, ip]), hc_realized)
+                            expected_value += eps_probs[q] * continuation
+                        end
+                    end
+                    return expected_value
                 end
 
-                hc1 = perceived_hc_next(
+                function objective(labor, investment)
+                    c = resources(labor) - investment
+                    if c <= min_c || investment < min_e || labor < 0.0 || labor >= 1.0
+                        return -Inf
+                    end
+
+                    hc_true_det = hc_production(
+                        hc0,
+                        investment,
+                        public_inputs[t],
+                        true_A,
+                        true_theta_h[t],
+                        true_theta_e[t],
+                        true_theta_g[t],
+                        true_rho[t],
+                    )
+                    if hc_true_det <= 0.0
+                        return -Inf
+                    end
+
+                    current_value = crra_utility(c, labor, eta, gamma)
+                    if !isfinite(current_value)
+                        return -Inf
+                    end
+
+                    # Child human capital enters preferences only through the
+                    # terminal payoff. Passing b = [0, 0, large_b] keeps the
+                    # early-period value of investment purely dynamic.
+                    if t == periods
+                        return current_value + beta * b[t] * expected_continuation(hc_true_det)
+                    end
+                    return current_value + beta * expected_continuation(hc_true_det)
+                end
+
+                starts = (
+                    (0.20, 0.05),
+                    (0.45, 0.20),
+                    (0.70, 0.45),
+                    (0.90, 0.75),
+                )
+
+                best_l = 0.0
+                best_e = min_e
+                best_value = -Inf
+
+                for (l0, e_share) in starts
+                    e0 = min_e + e_share * max(max_e - min_e, 0.0)
+                    l_candidate, e_candidate, value_candidate = coordinate_maximize(
+                        objective,
+                        l0,
+                        e0,
+                        max_l,
+                        max_e,
+                        resources;
+                        min_c=min_c,
+                        min_e=min_e,
+                        tolerance=tolerance,
+                    )
+
+                    if value_candidate > best_value
+                        best_l = l_candidate
+                        best_e = e_candidate
+                        best_value = value_candidate
+                    end
+                end
+
+                best_c = resources(best_l) - best_e
+                perceived_hc_det = hc_production(
                     hc0,
-                    investment,
+                    best_e,
                     public_inputs[t],
-                    A,
-                    theta_h[t],
-                    theta_e[t],
-                    theta_g[t],
-                    rho[t],
+                    perceived_A,
+                    perceived_theta_h[t],
+                    perceived_theta_e[t],
+                    perceived_theta_g[t],
+                    perceived_rho[t],
                 )
-                if hc1 <= 0.0
-                    return -Inf
-                end
-
-                current_value = crra_utility(c, labor, eta, gamma)
-                if !isfinite(current_value)
-                    return -Inf
-                end
-
-                if t == periods
-                    return current_value + beta * b * log(hc1)
-                end
-                continuation = linear_interp(hc_grid, vec(value_policy[t + 1, :]), hc1)
-                return current_value + beta * continuation
-            end
-
-            starts = (
-                (0.20, 0.05),
-                (0.45, 0.20),
-                (0.70, 0.45),
-                (0.90, 0.75),
-            )
-
-            best_l = 0.0
-            best_e = min_e
-            best_value = -Inf
-
-            # Multi-start coordinate optimization. The shares below initialize
-            # investment as a fraction of the feasible investment range.
-            for (l0, e_share) in starts
-                e0 = min_e + e_share * max(max_e - min_e, 0.0)
-                l_candidate, e_candidate, value_candidate = coordinate_maximize(
-                    objective,
-                    l0,
-                    e0,
-                    max_l,
-                    max_e,
-                    resources;
-                    min_c=min_c,
-                    min_e=min_e,
-                    tolerance=tolerance,
+                true_hc_det = hc_production(
+                    hc0,
+                    best_e,
+                    public_inputs[t],
+                    true_A,
+                    true_theta_h[t],
+                    true_theta_e[t],
+                    true_theta_g[t],
+                    true_rho[t],
                 )
+                expected_true_hc = sum(eps_probs .* (true_hc_det .* eps_nodes))
 
-                if value_candidate > best_value
-                    best_l = l_candidate
-                    best_e = e_candidate
-                    best_value = value_candidate
-                end
+                c_policy[t, ih, ip] = best_c
+                l_policy[t, ih, ip] = best_l
+                e_policy[t, ih, ip] = best_e
+                perceived_hc_next_policy[t, ih, ip] = perceived_hc_det
+                true_expected_hc_next_policy[t, ih, ip] = expected_true_hc
+                value_policy[t, ih, ip] = best_value
             end
-
-            best_c = resources(best_l) - best_e
-            best_hc_next = perceived_hc_next(
-                hc0,
-                best_e,
-                public_inputs[t],
-                A,
-                theta_h[t],
-                theta_e[t],
-                theta_g[t],
-                rho[t],
-            )
-
-            c_policy[t, ih] = best_c
-            l_policy[t, ih] = best_l
-            e_policy[t, ih] = best_e
-            hc_next_policy[t, ih] = best_hc_next
-            value_policy[t, ih] = best_value
         end
     end
 
@@ -408,33 +440,32 @@ function compute_parent_policy(
         c_policy=c_policy,
         l_policy=l_policy,
         e_policy=e_policy,
-        hc_next_policy=hc_next_policy,
+        perceived_hc_next_policy=perceived_hc_next_policy,
+        true_expected_hc_next_policy=true_expected_hc_next_policy,
         value_policy=value_policy,
         hc_grid=hc_grid,
+        parent_h_grid=parent_h_grid,
+        shock_nodes=eps_nodes,
+        shock_probs=eps_probs,
     )
 end
 
 
-"""
-    run_demo_tests()
-
-Create test data, solve the parent policy problem, and assert basic economic
-and numerical properties, running only when the file is executed as a
-script, not when it is included by another Julia file.
-"""
 function run_demo_tests()
     hc_grid = collect(range(0.5, 2.0, length=8))
-    h = 1.2
-    wages = [2.0, 2.1, 2.3]
-    transfers = [0.35, 0.35, 0.35]
-    public_inputs = [0.8, 0.9, 1.0]
+    parent_h_grid = [0.8, 1.2, 1.8]
 
     result = compute_parent_policy(
         hc_grid,
-        h,
-        wages,
-        transfers,
-        public_inputs,
+        parent_h_grid,
+        [2.0, 2.1, 2.3],
+        [0.35, 0.35, 0.35],
+        [0.8, 0.9, 1.0],
+        [0.35, 0.35, 0.35],
+        [0.35, 0.35, 0.35],
+        [0.30, 0.30, 0.30],
+        [0.20, 0.20, 0.20],
+        [0.0, 0.0, 0.0],
         [0.35, 0.35, 0.35],
         [0.35, 0.35, 0.35],
         [0.30, 0.30, 0.30],
@@ -445,29 +476,35 @@ function run_demo_tests()
         gamma=1.5,
         b=0.6,
         tau=[0.10, 0.10, 0.10],
+        sigma_h=0.10,
         min_c=1e-8,
         min_e=1e-8,
+        quadrature_n=7,
     )
 
+    @assert size(result.c_policy) == (3, length(hc_grid), length(parent_h_grid))
     @assert all(isfinite, result.c_policy)
     @assert all(isfinite, result.l_policy)
     @assert all(isfinite, result.e_policy)
-    @assert all(isfinite, result.hc_next_policy)
+    @assert all(isfinite, result.perceived_hc_next_policy)
+    @assert all(isfinite, result.true_expected_hc_next_policy)
     @assert all(isfinite, result.value_policy)
     @assert all(result.l_policy .>= 0.0)
     @assert all(result.l_policy .<= 1.0)
     @assert all(result.c_policy .> 0.0)
     @assert all(result.e_policy .>= 0.0)
+    @assert abs(sum(result.shock_probs) - 1.0) < 1e-10
 
     for t in 1:3
-        resources = (1.0 - 0.10) .* wages[t] .* h .* result.l_policy[t, :] .+ transfers[t]
-        @assert all(result.c_policy[t, :] .+ result.e_policy[t, :] .<= resources .+ 1e-7)
+        for ip in eachindex(parent_h_grid)
+            resources = (1.0 - 0.10) .* [2.0, 2.1, 2.3][t] .* parent_h_grid[ip] .* result.l_policy[t, :, ip] .+ 0.35
+            @assert all(result.c_policy[t, :, ip] .+ result.e_policy[t, :, ip] .<= resources .+ 1e-7)
+        end
     end
-
-    @assert result.value_policy[3, end] > result.value_policy[3, 1]
 
     println("parent_policy_solver.jl demo tests passed")
     println("c_policy size: ", size(result.c_policy))
+    println("shock probabilities sum: ", sum(result.shock_probs))
     println("labor range: ", minimum(result.l_policy), " to ", maximum(result.l_policy))
     println("investment min: ", minimum(result.e_policy))
     println("consumption min: ", minimum(result.c_policy))
