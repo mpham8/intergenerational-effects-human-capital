@@ -7,7 +7,7 @@ import os
 from collections import defaultdict
 from pathlib import Path
 
-PLOT_DIR = Path("output/policy_plots")
+PLOT_DIR = Path("output/new_CES_plots")
 MPLCONFIG_DIR = PLOT_DIR / "mplconfig"
 MPLCONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(MPLCONFIG_DIR.resolve()))
@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-DATA_DIR = Path("output/policy_plots/data")
+DATA_DIR = Path("output/new_CES_plots/data")
 
 PLOT_SPECS = [
     ("e_policy", "Parental investment e"),

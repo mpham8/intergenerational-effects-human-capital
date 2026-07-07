@@ -4,7 +4,7 @@
 # time, and writes tidy CSV files that can be plotted by Python/matplotlib.
 # It intentionally uses no external Julia packages.
 
-include("parent_policy_solver.jl")
+include("new_CES_solver.jl")
 
 
 function ensure_dir(path::String)
@@ -41,7 +41,7 @@ end
 
 
 function solve_scenario(; h, public_inputs, rho)
-    hc_grid = loggrid(0.5, 2.5, 40, 2.0)
+    hc_grid = loggrid(0.5, 2.5, 200, 2.0)
     parent_h_grid = [h]
 
     return compute_parent_policy(
@@ -105,7 +105,7 @@ end
 
 
 function generate_all_scenarios()
-    data_dir = joinpath("output", "policy_plots", "data")
+    data_dir = joinpath("output", "new_CES_plots", "data")
     ensure_dir(data_dir)
 
     scenario_specs = Dict(
