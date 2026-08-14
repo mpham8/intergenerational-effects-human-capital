@@ -1,9 +1,32 @@
 rm(list=ls())
 
-dir<-('C:/Users/kahna/Dropbox/OConnell 2025 Research/Attanasio Replication/')
+command_args <- commandArgs(trailingOnly = FALSE)
+file_argument <- command_args[grepl("^--file=", command_args)]
+configured_script_dir <- Sys.getenv("IEHC_ATTANASIO_SCRIPT_DIR", unset = "")
+if (nzchar(configured_script_dir)) {
+  dir <- normalizePath(configured_script_dir, mustWork = TRUE)
+} else if (length(file_argument) == 1) {
+  master_file <- gsub("~\\+~", " ", sub("^--file=", "", file_argument))
+  dir <- dirname(normalizePath(master_file, mustWork = TRUE))
+} else {
+  dir <- normalizePath(getwd(), mustWork = TRUE)
+}
 
-dir_data           <- ('C:/Users/kahna/Dropbox/OConnell 2025 Research/')
-dir_output <- paste(dir, c("Output"), sep="")
+# All machine-specific paths are environment overrides. The defaults make the
+# current Mac checkout runnable; on the Windows VDE only these variables need
+# to change, rather than the source code.
+default_data_file <- "/Users/joshualeinwand/Desktop/Summer/Expenditure Per Student/outputs/Fake_Merged_Data_with_cex_education_expenditure.csv"
+data_file <- Sys.getenv("IEHC_NLSY_DATA_FILE", unset = default_data_file)
+dir_output <- Sys.getenv(
+  "IEHC_ATTANASIO_OUTPUT_DIR",
+  unset = file.path(dir, "Our Most Recent Output")
+)
+dir_data <- dirname(data_file)
+
+if (!file.exists(data_file)) {
+  stop(paste("IEHC_NLSY_DATA_FILE does not exist:", data_file))
+}
+dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
 
 
 
@@ -52,8 +75,8 @@ source("Our_estim_meas_model.R")
 
 # Specify values for bootstrap:
 
-bsample <- 2 # number of bootstrap samples
-Bootstrap          <- 1                   # 1 if run the bootstrap; 0 otherwise  
+bsample <- as.integer(Sys.getenv("IEHC_BOOTSTRAP_SAMPLES", unset = "2"))
+Bootstrap          <- as.integer(Sys.getenv("IEHC_RUN_BOOTSTRAP", unset = "1"))
 onlyboot           <- 0                   # 1 if we only want to perform the bootstrap; 0 if we want to estimate the model on true data and bootstrap data
 
 setwd(dir)

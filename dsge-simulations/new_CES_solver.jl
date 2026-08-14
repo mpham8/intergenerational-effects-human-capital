@@ -44,15 +44,17 @@ end
 
 
 """
-    hc_production(hc, e, time_investment, g, A, theta_h, theta_e, theta_g, rho; min_input)
+    hc_production(hc, e, time_investment, g, A, theta_h, theta_e, theta_g, rho; ...)
 
 Nested CES human-capital production from equation 34. The same function is used
 for both perceived and true technologies; the caller passes the relevant
 parameter vector.
 
-Equation 34 uses monetary investment e, parental time investment tau, and public
-input z. In this solver copy, parental time investment is the parent's non-labor
-time, 1 - labor. The experiment fixes delta = mu = theta_p = 1/2.
+Equation 41 uses monetary investment e, parental time investment tau, and public
+input z. Parental time investment is the parent's non-labor time, 1 - labor.
+The nested-CES parameters are explicit keywords so Rev3 can use the
+period-specific Attanasio estimates. The theta_e and theta_g positional
+arguments remain for compatibility with earlier callers.
 """
 function hc_production(
     hc::Float64,
@@ -64,17 +66,16 @@ function hc_production(
     theta_e::Float64,
     theta_g::Float64,
     rho::Float64;
+    theta_p::Float64 = 0.5,
+    ces_delta::Float64 = 0.5,
+    mu::Float64 = 0.5,
     min_input::Float64 = 1e-12,
 )
     hc_pos = max(hc, min_input)
     e_pos = max(e, min_input)
     time_pos = max(time_investment, min_input)
     g_pos = max(g, min_input)
-    delta = 0.5
-    mu = 0.5
-    theta_p = 0.5
-
-    parental_index = e_pos^delta * time_pos^(1.0 - delta)
+    parental_index = e_pos^ces_delta * time_pos^(1.0 - ces_delta)
     if abs(mu) < 1e-8
         contemporaneous_index = parental_index^theta_p * g_pos^(1.0 - theta_p)
     else
@@ -273,7 +274,15 @@ function compute_parent_policy(
     gamma::Float64,
     b,
     tau,
-    sigma_h::Float64,
+    sigma_h,
+    perceived_theta_p = 0.5,
+    perceived_ces_delta = 0.5,
+    perceived_mu = 0.5,
+    perceived_parent_education_coefficient = 0.0,
+    true_theta_p = 0.5,
+    true_ces_delta = 0.5,
+    true_mu = 0.5,
+    true_parent_education_coefficient = 0.0,
     controls = nothing,
     x_coeffs = nothing,
     min_c::Float64 = 1e-8,
@@ -297,6 +306,17 @@ function compute_parent_policy(
     true_theta_g = as_period_vector(true_theta_g, periods)
     true_rho = as_period_vector(true_rho, periods)
     true_d = as_period_vector(true_d, periods)
+    perceived_theta_p = as_period_vector(perceived_theta_p, periods)
+    perceived_ces_delta = as_period_vector(perceived_ces_delta, periods)
+    perceived_mu = as_period_vector(perceived_mu, periods)
+    perceived_parent_education_coefficient =
+        as_period_vector(perceived_parent_education_coefficient, periods)
+    true_theta_p = as_period_vector(true_theta_p, periods)
+    true_ces_delta = as_period_vector(true_ces_delta, periods)
+    true_mu = as_period_vector(true_mu, periods)
+    true_parent_education_coefficient =
+        as_period_vector(true_parent_education_coefficient, periods)
+    sigma_h = as_period_vector(sigma_h, periods)
     b = as_period_vector(b, periods)
     tau = as_period_vector(tau, periods)
 
@@ -312,7 +332,7 @@ function compute_parent_policy(
         x_beta = controls_matrix * coeffs
     end
 
-    eps_nodes, eps_probs = normal_quadrature(quadrature_n, sigma_h)
+    quadratures = [normal_quadrature(quadrature_n, sigma_h[t]) for t in 1:periods]
 
     n_hc = length(hc_grid)
     n_parent = length(parent_h_grid)
@@ -324,11 +344,18 @@ function compute_parent_policy(
     value_policy = fill(-Inf, periods, n_hc, n_parent)
 
     for t in periods:-1:1
-        perceived_A = exp(perceived_d[t] + x_beta[t])
-        true_A = exp(true_d[t] + x_beta[t])
-
         for ip in 1:n_parent
             parent_h = parent_h_grid[ip]
+            perceived_A = exp(
+                perceived_d[t] +
+                perceived_parent_education_coefficient[t] * parent_h +
+                x_beta[t],
+            )
+            true_A = exp(
+                true_d[t] +
+                true_parent_education_coefficient[t] * parent_h +
+                x_beta[t],
+            )
 
             for ih in 1:n_hc
                 hc0 = hc_grid[ih]
@@ -339,6 +366,7 @@ function compute_parent_policy(
                 max_e = max(min_e, max_resources - min_c)
 
                 function expected_continuation(hc_true_det)
+                    eps_nodes, eps_probs = quadratures[t]
                     expected_value = 0.0
                     for q in eachindex(eps_nodes)
                         hc_realized = hc_true_det * eps_nodes[q]
@@ -358,18 +386,25 @@ function compute_parent_policy(
                         return -Inf
                     end
 
-                    hc_true_det = hc_production(
+                    # Parents choose labor and monetary investment using the
+                    # production technology they believe. The true technology
+                    # is applied later when the realized household state is
+                    # simulated, so it must not enter this policy objective.
+                    hc_perceived_det = hc_production(
                         hc0,
                         investment,
                         1.0 - labor,
                         public_inputs[t],
-                        true_A,
-                        true_theta_h[t],
-                        true_theta_e[t],
-                        true_theta_g[t],
-                        true_rho[t],
+                        perceived_A,
+                        perceived_theta_h[t],
+                        perceived_theta_e[t],
+                        perceived_theta_g[t],
+                        perceived_rho[t];
+                        theta_p=perceived_theta_p[t],
+                        ces_delta=perceived_ces_delta[t],
+                        mu=perceived_mu[t],
                     )
-                    if hc_true_det <= 0.0
+                    if hc_perceived_det <= 0.0
                         return -Inf
                     end
 
@@ -382,9 +417,9 @@ function compute_parent_policy(
                     # terminal payoff. Passing b = [0, 0, large_b] keeps the
                     # early-period value of investment purely dynamic.
                     if t == periods
-                        return current_value + beta * b[t] * expected_continuation(hc_true_det)
+                        return current_value + beta * b[t] * expected_continuation(hc_perceived_det)
                     end
-                    return current_value + beta * expected_continuation(hc_true_det)
+                    return current_value + beta * expected_continuation(hc_perceived_det)
                 end
 
                 starts = (
@@ -429,7 +464,10 @@ function compute_parent_policy(
                     perceived_theta_h[t],
                     perceived_theta_e[t],
                     perceived_theta_g[t],
-                    perceived_rho[t],
+                    perceived_rho[t];
+                    theta_p=perceived_theta_p[t],
+                    ces_delta=perceived_ces_delta[t],
+                    mu=perceived_mu[t],
                 )
                 true_hc_det = hc_production(
                     hc0,
@@ -440,8 +478,12 @@ function compute_parent_policy(
                     true_theta_h[t],
                     true_theta_e[t],
                     true_theta_g[t],
-                    true_rho[t],
+                    true_rho[t];
+                    theta_p=true_theta_p[t],
+                    ces_delta=true_ces_delta[t],
+                    mu=true_mu[t],
                 )
+                eps_nodes, eps_probs = quadratures[t]
                 expected_true_hc = sum(eps_probs .* (true_hc_det .* eps_nodes))
 
                 c_policy[t, ih, ip] = best_c
@@ -463,8 +505,8 @@ function compute_parent_policy(
         value_policy=value_policy,
         hc_grid=hc_grid,
         parent_h_grid=parent_h_grid,
-        shock_nodes=eps_nodes,
-        shock_probs=eps_probs,
+        shock_nodes_by_period=first.(quadratures),
+        shock_probs_by_period=last.(quadratures),
     )
 end
 
@@ -511,7 +553,7 @@ function run_demo_tests()
     @assert all(result.l_policy .<= 1.0)
     @assert all(result.c_policy .> 0.0)
     @assert all(result.e_policy .>= 0.0)
-    @assert abs(sum(result.shock_probs) - 1.0) < 1e-10
+    @assert all(abs(sum(probabilities) - 1.0) < 1e-10 for probabilities in result.shock_probs_by_period)
 
     for t in 1:3
         for ip in eachindex(parent_h_grid)
@@ -522,7 +564,7 @@ function run_demo_tests()
 
     println("parent_policy_solver.jl demo tests passed")
     println("c_policy size: ", size(result.c_policy))
-    println("shock probabilities sum: ", sum(result.shock_probs))
+    println("shock probabilities sum: ", sum(result.shock_probs_by_period[1]))
     println("labor range: ", minimum(result.l_policy), " to ", maximum(result.l_policy))
     println("investment min: ", minimum(result.e_policy))
     println("consumption min: ", minimum(result.c_policy))

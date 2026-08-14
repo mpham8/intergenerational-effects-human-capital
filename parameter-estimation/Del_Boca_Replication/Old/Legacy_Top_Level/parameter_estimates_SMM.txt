@@ -1,0 +1,9 @@
+
+
+Parameter estimates from Simulated Method of Moments
+Delta: 13.113059414068285
+Rho_val: -0.4202024725100126
+Rho_e_val: 0.27311355213353594
+theta_1: 0.24978668837086218
+theta_2: 0.2847437105359359
+theta_3: 0.2300621669036073

@@ -2,35 +2,109 @@
 # Inputs: period 3 human capital, period 3 parental investments, period 3 governmental investments
 # Output: period 4 human capital
 
+ensure_tau <- function(alldata, period) {
+  tau_name <- paste0("tau", period)
+  if (!tau_name %in% names(alldata)) {
+    stop(paste("Missing estimated parental-time factor", tau_name))
+  }
+  return(alldata)
+}
+
+nested_ces_log <- function(h0, e, tau, z, theta_h, theta_p, ces_delta, mu, rho) {
+  mu_safe <- ifelse(abs(mu) < 1e-8, 1e-8, mu)
+  rho_safe <- ifelse(abs(rho) < 1e-8, 1e-8, rho)
+  private_input <- (e^ces_delta) * (tau^(1 - ces_delta))
+  private_public <- theta_p * private_input^mu_safe + (1 - theta_p) * z^mu_safe
+  total_input <- theta_h * h0^rho_safe + (1 - theta_h) * private_public^(rho_safe / mu_safe)
+  return((1 / rho_safe) * log(total_input))
+}
+
+export_rev3_bridge <- function(output_dir, period_estimates) {
+  extract_period <- function(period, estimate_matrix) {
+    if (is.null(dim(estimate_matrix)) || ncol(estimate_matrix) < 2) {
+      stop(paste("Period", period, "does not contain control-function estimates."))
+    }
+    estimate <- estimate_matrix[, 2]
+    names(estimate) <- rownames(estimate_matrix)
+    required <- c(
+      "delta", "control function", "peducation", "theta_h", "theta_p",
+      "ces_delta", "mu", "rho", "residual sd"
+    )
+    if (!all(required %in% names(estimate))) {
+      stop(paste("Period", period, "is missing required nested-CES estimates."))
+    }
+    values <- estimate[required]
+    if (any(!is.finite(values))) {
+      stop(paste("Period", period, "contains nonfinite nested-CES estimates."))
+    }
+    if (values[["theta_h"]] <= 0 || values[["theta_h"]] >= 1 ||
+        values[["theta_p"]] <= 0 || values[["theta_p"]] >= 1 ||
+        values[["ces_delta"]] <= 0 || values[["ces_delta"]] >= 1 ||
+        values[["mu"]] < -5 || values[["mu"]] > 1 ||
+        values[["rho"]] < -5 || values[["rho"]] > 1 ||
+        values[["residual sd"]] <= 0) {
+      stop(paste("Period", period, "contains an out-of-domain nested-CES estimate."))
+    }
+    data.frame(
+      period = period,
+      intercept = unname(values[["delta"]]),
+      parent_education_coefficient = unname(values[["peducation"]]),
+      theta_h = unname(values[["theta_h"]]),
+      theta_p = unname(values[["theta_p"]]),
+      ces_delta = unname(values[["ces_delta"]]),
+      mu = unname(values[["mu"]]),
+      rho = unname(values[["rho"]]),
+      control_function_coefficient = unname(values[["control function"]]),
+      residual_sd = unname(values[["residual sd"]])
+    )
+  }
+
+  bridge <- do.call(
+    rbind,
+    lapply(seq_along(period_estimates), function(period) {
+      extract_period(period, period_estimates[[period]])
+    })
+  )
+  bridge_file <- file.path(output_dir, "attanasio_rev3_bridge.csv")
+  write.csv(bridge, bridge_file, row.names = FALSE)
+  message("Wrote Rev3 technology bridge: ", bridge_file)
+  invisible(bridge)
+}
+
 CES3_nocf <- function(alldata) {
+  alldata <- ensure_tau(alldata, 3)
   out <- log(alldata$hc4)
   # Debug CES term
-  s1 <- 0.3; s2 <- 0.2; rho <- -2
-  ces_term <- s1 * alldata$hc3^rho + s2 * alldata$govinvest3^rho + (1-s1-s2) * alldata$pinvest3^rho
+  theta_h <- 0.3; theta_p <- 0.5; ces_delta <- 0.5; mu <- -2; rho <- -2
+  ces_term <- nested_ces_log(alldata$hc3, alldata$pinvest3, alldata$tau3, alldata$govinvest3,
+                             theta_h, theta_p, ces_delta, mu, rho)
   print("CES term summary at start:")
   print(summary(ces_term))
-  cesout <- try(nlsLM(out ~ (1/rho)*log(s1 * hc3^rho + s2 * govinvest3^rho + (1-s1-s2) * pinvest3^rho) 
+  cesout <- try(nlsLM(out ~ nested_ces_log(hc3, pinvest3, tau3, govinvest3,
+                                           theta_h, theta_p, ces_delta, mu, rho)
                       + delta + alpha3 * peducation, data = alldata,
-                      start=c(delta=0.3, alpha3=0.05, s1=0.3, s2=0.2, rho=0.5),
-                      lower=c(-Inf, -Inf, 0, 0, -5),
-                      upper=c(Inf, Inf, 1, 1, 5),
+                      start=c(delta=0.3, alpha3=0.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
+                      lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
+                      upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000, ftol=1e-8, ptol=1e-8, gtol=1e-8)), silent=FALSE)
   if (length(summary(cesout)) == 11) {  
     npar <- nrow(summary(cesout)[[10]])
-    elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
-    s3 <- 1 - sum(summary(cesout)[[10]][3:4,1])
+    outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
+    inner_elast <- 1 / (1 - (summary(cesout)[[10]][npar-1,1]))
     residual_sd <- summary(cesout)[[3]]
-    estim <- c(summary(cesout)[[10]][1:(npar-1),1], s3, summary(cesout)[[10]][npar,1], elast, residual_sd)
-    names(estim) <- c("delta", "peducation", "hc3", "govinvest3", "pinvest3", "rho", "elast", "residual sd")
+    estim <- c(summary(cesout)[[10]][1:npar,1], outer_elast, inner_elast, residual_sd)
+    names(estim) <- c("delta", "peducation", "theta_h", "theta_p", "ces_delta", "mu", "rho",
+                      "outer elast", "inner elast", "residual sd")
   } else {
     print("nlsLM failed with error:")
     print(cesout)
-    estim <- rep(NA, 8)
+    estim <- rep(NA, 10)
   }
   return(estim)
 }
 
 CES3_cf <- function(alldata){
+  alldata <- ensure_tau(alldata, 3)
   out <- log(alldata$hc4)
   inst3 <- lm(log(pinvest3) ~ log(hc3) + log(peducation) + log(income3), data=alldata)
   cf <- inst3$residuals
@@ -49,19 +123,21 @@ CES3_cf <- function(alldata){
                   lower.tail = FALSE),
     row.names = names(summary(inst3)$coefficients[,1])
   )
-  cesout <- try(nlsLM(out ~ (1/rho)* log(s1 * hc3^rho + s2*govinvest3^rho + (1-s1-s2)* pinvest3^rho) 
+  cesout <- try(nlsLM(out ~ nested_ces_log(hc3, pinvest3, tau3, govinvest3,
+                                           theta_h, theta_p, ces_delta, mu, rho)
                       + delta + alpha*cf + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha=0, alpha3=.05, s1=0.3, s2=0.2, rho=0.5),
-                      lower=c(-Inf, -Inf, -Inf, 0, 0, -5),
-                      upper=c(Inf, Inf, Inf, 1, 1, 5),
+                      start=c(delta=0.3, alpha=0, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
+                      lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
+                      upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
-    elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
-    s3 <- 1 - sum(summary(cesout)[[10]][4:5,1])
+    outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
+    inner_elast <- 1 / (1 - (summary(cesout)[[10]][npar-1,1]))
     residual_sd <- summary(cesout)[[3]]
-    estim <- c(summary(cesout)[[10]][1:(npar-1),1], s3, summary(cesout)[[10]][npar,1], elast, residual_sd)
-    names(estim) <- c("delta", "controlfn", "peducation", "hc3", "govinvest3", "pinvest3", "rho", "elast", "residual sd")
+    estim <- c(summary(cesout)[[10]][1:npar,1], outer_elast, inner_elast, residual_sd)
+    names(estim) <- c("delta", "controlfn", "peducation", "theta_h", "theta_p", "ces_delta", "mu", "rho",
+                      "outer elast", "inner elast", "residual sd")
     gamma = summary(cesout)[[10]][2,1]
     structural_res = residuals(cesout) + gamma*cf
     reg <- lm(structural_res ~ log(hc3) + log(peducation) + log(income3), data=alldata)
@@ -69,7 +145,7 @@ CES3_cf <- function(alldata){
     se <- as.vector(summary.lm(reg)[[4]][,2])
     vcov <- as.matrix(vcov(reg))
   } else {
-    estim <- rep(NA, 9)
+    estim <- rep(NA, 11)
     coef <- rep(NA, 4)
   }
   return(list(estim, summary(inst3)[[4]][,1], coef, inst3_summary))
@@ -78,27 +154,31 @@ CES3_cf <- function(alldata){
 # Period 2
 
 CES2_nocf <- function(alldata){
+  alldata <- ensure_tau(alldata, 2)
   out <- log(alldata$hc3)
-  cesout <- try(nlsLM(out ~ (1/rho)* log(s1 * hc2^rho + s2*govinvest2^rho + (1-s1-s2)* pinvest2^rho) 
+  cesout <- try(nlsLM(out ~ nested_ces_log(hc2, pinvest2, tau2, govinvest2,
+                                           theta_h, theta_p, ces_delta, mu, rho)
                       + delta + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha3=.05, s1=0.3, s2=0.2, rho=0.5),
-                      lower=c(-Inf, -Inf, 0, 0, -5),
-                      upper=c(Inf, Inf, 1, 1, 5),
+                      start=c(delta=0.3, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
+                      lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
+                      upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
-    elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
-    s3 <- 1 - sum(summary(cesout)[[10]][3:4,1])
+    outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
+    inner_elast <- 1 / (1 - (summary(cesout)[[10]][npar-1,1]))
     residual_sd <- summary(cesout)[[3]]
-    estim <- c(summary(cesout)[[10]][1:(npar-1),1], s3, summary(cesout)[[10]][npar,1], elast, residual_sd)
-    names(estim) <- c("delta", "peducation", "hc2", "govinvest2", "pinvest2", "rho", "elast", "residual sd")
+    estim <- c(summary(cesout)[[10]][1:npar,1], outer_elast, inner_elast, residual_sd)
+    names(estim) <- c("delta", "peducation", "theta_h", "theta_p", "ces_delta", "mu", "rho",
+                      "outer elast", "inner elast", "residual sd")
   } else {
-    estim <- rep(NA, 8)
+    estim <- rep(NA, 10)
   }
   return(estim)
 }
 
 CES2_cf <- function(alldata){
+  alldata <- ensure_tau(alldata, 2)
   out <- log(alldata$hc3)
   inst2 <- lm(log(pinvest2) ~ log(hc2) + log(peducation) + log(income2), data=alldata)
   cf <- inst2$residuals
@@ -117,19 +197,21 @@ CES2_cf <- function(alldata){
                   lower.tail = FALSE),
     row.names = names(summary(inst2)$coefficients[,1])
   )
-  cesout <- try(nlsLM(out ~ (1/rho)* log(s1 * hc2^rho + s2*govinvest2^rho + (1-s1-s2)* pinvest2^rho) 
+  cesout <- try(nlsLM(out ~ nested_ces_log(hc2, pinvest2, tau2, govinvest2,
+                                           theta_h, theta_p, ces_delta, mu, rho)
                       + delta + alpha*cf + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha=0, alpha3=.05, s1=0.3, s2=0.2, rho=0.5),
-                      lower=c(-Inf, -Inf, -Inf, 0, 0, -5),
-                      upper=c(Inf, Inf, Inf, 1, 1, 5),
+                      start=c(delta=0.3, alpha=0, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
+                      lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
+                      upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
-    elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
-    s3 <- 1 - sum(summary(cesout)[[10]][4:5,1])
+    outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
+    inner_elast <- 1 / (1 - (summary(cesout)[[10]][npar-1,1]))
     residual_sd <- summary(cesout)[[3]]
-    estim <- c(summary(cesout)[[10]][1:(npar-1),1], s3, summary(cesout)[[10]][npar,1], elast, residual_sd)
-    names(estim) <- c("delta", "controlfn", "peducation", "hc2", "govinvest2", "pinvest2", "rho", "elast", "residual sd")
+    estim <- c(summary(cesout)[[10]][1:npar,1], outer_elast, inner_elast, residual_sd)
+    names(estim) <- c("delta", "controlfn", "peducation", "theta_h", "theta_p", "ces_delta", "mu", "rho",
+                      "outer elast", "inner elast", "residual sd")
     gamma = summary(cesout)[[10]][2,1]
     structural_res = residuals(cesout) + gamma*cf
     reg <- lm(structural_res ~ log(hc2) + log(peducation) + log(income2), data=alldata)
@@ -137,7 +219,7 @@ CES2_cf <- function(alldata){
     se <- as.vector(summary.lm(reg)[[4]][,2])
     vcov <- as.matrix(vcov(reg))
   } else {
-    estim <- rep(NA, 9)
+    estim <- rep(NA, 11)
     coef <- rep(NA, 4)
   }
   return(list(estim, summary(inst2)[[4]][,1], coef, inst2_summary))
@@ -146,27 +228,31 @@ CES2_cf <- function(alldata){
 # Period 1
 
 CES1_nocf <- function(alldata){
+  alldata <- ensure_tau(alldata, 1)
   out <- log(alldata$hc2)
-  cesout <- try(nlsLM(out ~ (1/rho)* log(s1 * hc1^rho + s2*govinvest1^rho + (1-s1-s2)* pinvest1^rho) 
+  cesout <- try(nlsLM(out ~ nested_ces_log(hc1, pinvest1, tau1, govinvest1,
+                                           theta_h, theta_p, ces_delta, mu, rho)
                       + delta + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha3=.05, s1=0.3, s2=0.2, rho=0.5),
-                      lower=c(-Inf, -Inf, 0, 0, -5),
-                      upper=c(Inf, Inf, 1, 1, 5),
+                      start=c(delta=0.3, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
+                      lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
+                      upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
-    elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
-    s3 <- 1 - sum(summary(cesout)[[10]][3:4,1])
+    outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
+    inner_elast <- 1 / (1 - (summary(cesout)[[10]][npar-1,1]))
     residual_sd <- summary(cesout)[[3]]
-    estim <- c(summary(cesout)[[10]][1:(npar-1),1], s3, summary(cesout)[[10]][npar,1], elast, residual_sd)
-    names(estim) <- c("delta", "peducation", "hc1", "govinvest1", "pinvest1", "rho", "elast", "residual sd")
+    estim <- c(summary(cesout)[[10]][1:npar,1], outer_elast, inner_elast, residual_sd)
+    names(estim) <- c("delta", "peducation", "theta_h", "theta_p", "ces_delta", "mu", "rho",
+                      "outer elast", "inner elast", "residual sd")
   } else {
-    estim <- rep(NA, 8)
+    estim <- rep(NA, 10)
   }
   return(estim)
 }
 
 CES1_cf <- function(alldata){
+  alldata <- ensure_tau(alldata, 1)
   out <- log(alldata$hc2)
   inst1 <- lm(log(pinvest1) ~ log(peducation) + log(income1), data=alldata)
   cf <- inst1$residuals
@@ -185,19 +271,21 @@ CES1_cf <- function(alldata){
                   lower.tail = FALSE),
     row.names = names(summary(inst1)$coefficients[,1])
   )
-  cesout <- try(nlsLM(out ~ (1/rho)* log(s1 * hc1^rho + s2*govinvest1^rho + (1-s1-s2)* pinvest1^rho) 
+  cesout <- try(nlsLM(out ~ nested_ces_log(hc1, pinvest1, tau1, govinvest1,
+                                           theta_h, theta_p, ces_delta, mu, rho)
                       + delta + alpha*cf + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha=0, alpha3=.05, s1=0.3, s2=0.2, rho=0.5),
-                      lower=c(-Inf, -Inf, -Inf, 0, 0, -5),
-                      upper=c(Inf, Inf, Inf, 1, 1, 5),
+                      start=c(delta=0.3, alpha=0, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
+                      lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
+                      upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
-    elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
-    s3 <- 1 - sum(summary(cesout)[[10]][4:5,1])
+    outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
+    inner_elast <- 1 / (1 - (summary(cesout)[[10]][npar-1,1]))
     residual_sd <- summary(cesout)[[3]]
-    estim <- c(summary(cesout)[[10]][1:(npar-1),1], s3, summary(cesout)[[10]][npar,1], elast, residual_sd)
-    names(estim) <- c("delta", "controlfn", "peducation", "hc1", "govinvest1", "pinvest1", "rho", "elast", "residual sd")
+    estim <- c(summary(cesout)[[10]][1:npar,1], outer_elast, inner_elast, residual_sd)
+    names(estim) <- c("delta", "controlfn", "peducation", "theta_h", "theta_p", "ces_delta", "mu", "rho",
+                      "outer elast", "inner elast", "residual sd")
     gamma = summary(cesout)[[10]][2,1]
     structural_res = residuals(cesout) + gamma*cf
     reg <- lm(structural_res ~ log(peducation) + log(income1), data=alldata)
@@ -205,7 +293,7 @@ CES1_cf <- function(alldata){
     se <- as.vector(summary.lm(reg)[[4]][,2])
     vcov <- as.matrix(vcov(reg))
   } else {
-    estim <- rep(NA, 9)
+    estim <- rep(NA, 11)
     coef <- rep(NA, 3)
   }
   return(list(estim, summary(inst1)[[4]][,1], coef, inst1_summary))
@@ -257,11 +345,14 @@ for (boot in 0:1){
     out_ces1_nocf <- matrix(nocf1_vector, ncol=1)
     out_ces1_cf <- matrix(out_ces1_cf, ncol=1)
     trueCESperiod1 <- cbind(out_ces1_nocf, out_ces1_cf)
-    rownames(trueCESperiod3) <- c("delta", "control function", "peducation", "hc3", "govinvest3", "pinvest3", "rho", "elast", "residual sd")
+    rownames(trueCESperiod3) <- c("delta", "control function", "peducation", "theta_h", "theta_p",
+                                  "ces_delta", "mu", "rho", "outer elast", "inner elast", "residual sd")
     colnames(trueCESperiod3) <- c("Human Capital without Control Function", "Human Capital with Control Function")
-    rownames(trueCESperiod2) <- c("delta", "control function", "peducation", "hc2", "govinvest2", "pinvest2", "rho", "elast", "residual sd")
+    rownames(trueCESperiod2) <- c("delta", "control function", "peducation", "theta_h", "theta_p",
+                                  "ces_delta", "mu", "rho", "outer elast", "inner elast", "residual sd")
     colnames(trueCESperiod2) <- c("Human Capital without Control Function", "Human Capital with Control Function")
-    rownames(trueCESperiod1) <- c("delta", "control function", "peducation", "hc1", "govinvest1", "pinvest1", "rho", "elast", "residual sd")
+    rownames(trueCESperiod1) <- c("delta", "control function", "peducation", "theta_h", "theta_p",
+                                  "ces_delta", "mu", "rho", "outer elast", "inner elast", "residual sd")
     colnames(trueCESperiod1) <- c("Human Capital without Control Function", "Human Capital with Control Function")
     # Save output in the proper directory 
     setwd(dir_output)
@@ -274,6 +365,10 @@ for (boot in 0:1){
     save(coef_ces3, file="coef_ces3.R")
     save(coef_ces2, file="coef_ces2.R")
     save(coef_ces1, file="coef_ces1.R")
+    export_rev3_bridge(
+      dir_output,
+      list(trueCESperiod1, trueCESperiod2, trueCESperiod3)
+    )
   }
   # Estimation on bootstrap data
   else if (boot==1){
@@ -318,16 +413,16 @@ for (boot in 0:1){
       return(estim)
     }
     # Create array to save estimates from each bootstrap
-    bootCES3 <- array(0, dim=c(9, 2, bsample))
-    bootCES2 <- array(0, dim=c(9, 2, bsample))
-    bootCES1 <- array(0, dim=c(9, 2, bsample))
+    bootCES3 <- array(0, dim=c(11, 2, bsample))
+    bootCES2 <- array(0, dim=c(11, 2, bsample))
+    bootCES1 <- array(0, dim=c(11, 2, bsample))
     bootInvest3 <- array(0, dim=c(4, 1, bsample))
     bootInvest2 <- array(0, dim=c(4, 1, bsample))
     bootInvest1 <- array(0, dim=c(3, 1, bsample))
     bootcoef_ces3 <- array(0, dim=c(4, bsample))
     bootcoef_ces2 <- array(0, dim=c(4, bsample))
     bootcoef_ces1 <- array(0, dim=c(3, bsample))
-    npar <- 9
+    npar <- 11
     npar1 <- npar - 1
     # Run the estimation on each bootstrap sample 
     for (b in 1:bsample) {
@@ -363,7 +458,7 @@ for (boot in 0:1){
 # MAKE TABLES OF RESULTS WITH BOOTSTRAPPED STANDARD ERRORS
 
 # Estimates of the production functions:
-npar <- 8
+npar <- 10
 
 cestable_3 <- matrix(0, (npar*3), 2)
 cestable_2 <- matrix(0, (npar*3), 2)
@@ -382,11 +477,13 @@ colnames(cestable_3) <- c("Human Capital without Control Function", "Human Capit
 rownames(cestable_3) <- c("delta","","",
                           "control function","","",
                           "peducation","","",
-                          "human capital 3","","",
-                          "government investment 3","","",
-                          "parental investment 3","","",
+                          "theta_h","","",
+                          "theta_p","","",
+                          "ces_delta","","",
+                          "mu","","",
                           "rho","","",
-                          "elasticity of substitution","","")
+                          "outer elasticity of substitution","","",
+                          "inner elasticity of substitution","","")
 
 # Estimates of the investment functions (Period 3)
 investtable_3 <- matrix(0, (4*3), 1)
@@ -415,11 +512,13 @@ colnames(cestable_2) <- c("Human Capital without Control Function", "Human Capit
 rownames(cestable_2) <- c("delta","","",
                           "control function","","",
                           "peducation","","",
-                          "human capital 2","","",
-                          "government investment 2","","",
-                          "parental investment 2","","",
+                          "theta_h","","",
+                          "theta_p","","",
+                          "ces_delta","","",
+                          "mu","","",
                           "rho","","",
-                          "elasticity of substitution","","")
+                          "outer elasticity of substitution","","",
+                          "inner elasticity of substitution","","")
 
 # Estimates of the investment functions (Period 2)
 investtable_2 <- matrix(0, (4*3), 1)
@@ -448,11 +547,13 @@ colnames(cestable_1) <- c("Human Capital without Control Function", "Human Capit
 rownames(cestable_1) <- c("delta","","",
                           "control function","","",
                           "peducation","","",
-                          "human capital 1","","",
-                          "government investment 1","","",
-                          "parental investment 1","","",
+                          "theta_h","","",
+                          "theta_p","","",
+                          "ces_delta","","",
+                          "mu","","",
                           "rho","","",
-                          "elasticity of substitution","","")
+                          "outer elasticity of substitution","","",
+                          "inner elasticity of substitution","","")
 
 # Estimates of the investment functions (Period 1)
 investtable_1 <- matrix(0, (3*3), 1)
