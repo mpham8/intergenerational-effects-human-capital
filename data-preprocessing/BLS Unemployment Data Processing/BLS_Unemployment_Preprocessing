@@ -1,0 +1,51 @@
+import pandas as pd
+import numpy as np
+import os
+
+all_years = []
+stats_list = []
+
+for year in range(1990, 2025):
+    # Get last two digits, pad with zero if needed
+    year_suffix = str(year % 100).zfill(2)
+    file_path = f'BLS Unemployment Data Processing/laucnty{year_suffix}.xlsx'
+    if os.path.exists(file_path):
+        df = pd.read_excel(file_path, header=1)
+        #Converts the FIPS codes to integers and then strings to prevent the strings ending in .0
+        df = df.dropna(subset=['State FIPS Code', 'County FIPS Code'])
+        df['state_fips'] = df['State FIPS Code'].astype(int).astype(str).str.zfill(2)
+        df['county_fips'] = df['County FIPS Code'].astype(int).astype(str).str.zfill(3)
+        #Creates combined FIPS code by concatenating state and county FIPS codes
+        df['FIPS'] = df['state_fips'] + df['county_fips']
+        processed = df[['FIPS', 'County Name/State Abbreviation', 'Year', 'Unemployment Rate (%)']].copy()
+        processed['Unemployment Rate (%)'] = pd.to_numeric(processed['Unemployment Rate (%)'], errors='coerce')
+        all_years.append(processed)
+
+        # Descriptive stats for this year
+        total = processed['Unemployment Rate (%)'].shape[0]
+        missing = processed['Unemployment Rate (%)'].isna().sum()
+        percent_missing = (missing / total) * 100 if total > 0 else np.nan
+        mean = processed['Unemployment Rate (%)'].mean()
+        median = processed['Unemployment Rate (%)'].median()
+        std = processed['Unemployment Rate (%)'].std()
+        min_val = processed['Unemployment Rate (%)'].min()
+        max_val = processed['Unemployment Rate (%)'].max()
+        stats_list.append({
+            'Year': year,
+            'Percent_Missing': percent_missing,
+            'Mean': mean,
+            'Median': median,
+            'Std': std,
+            'Min': min_val,
+            'Max': max_val
+        })
+    else:
+        print(f"File not found: {file_path}")
+
+# Combine all years and save
+combined = pd.concat(all_years, ignore_index=True)
+combined.to_csv('BLS Unemployment Data Processing/BLS_Unemployment_Processed_All_Years.csv', index=False)
+
+# Save descriptive statistics
+stats_df = pd.DataFrame(stats_list)
+stats_df.to_csv('BLS Unemployment Data Processing/BLS_Unemployment_Descriptive_Stats_By_Year.csv', index=False)

@@ -1,0 +1,50 @@
+import numpy as np
+import pandas as pd
+import os
+
+all_years = []
+stats_list = []
+
+# Process BLS wage data for each year from 1975 to 2024
+for year in range(1975, 2025):
+    file_path = f'BLS Wage Data Processing/{year}.annual 10 Total, all industries.csv'
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path)
+        selected_columns = ['area_fips', 'year', 'avg_annual_pay']
+        bls = df[selected_columns]
+        bls['avg_annual_pay'] = bls['avg_annual_pay'].mask(bls['avg_annual_pay'] < 0.01, np.nan)
+        bls.rename(columns={
+            'area_fips': 'FIPS_Code',
+            'year': 'Year',
+            'avg_annual_pay': 'Average_Annual_Pay'
+        }, inplace=True)
+        all_years.append(bls)
+        
+        # Calculate descriptive statistics for this year
+        total = bls['Average_Annual_Pay'].shape[0]
+        missing = bls['Average_Annual_Pay'].isna().sum()
+        percent_missing = (missing / total) * 100 if total > 0 else np.nan
+        mean = bls['Average_Annual_Pay'].mean()
+        median = bls['Average_Annual_Pay'].median()
+        std = bls['Average_Annual_Pay'].std()
+        min_val = bls['Average_Annual_Pay'].min()
+        max_val = bls['Average_Annual_Pay'].max()
+        stats_list.append({
+            'Year': year,
+            'Percent_Missing': percent_missing,
+            'Mean': mean,
+            'Median': median,
+            'Std': std,
+            'Min': min_val,
+            'Max': max_val
+        })
+    else:
+        print(f"File not found: {file_path}")
+
+# Combine all years into one DataFrame
+combined_bls = pd.concat(all_years, ignore_index=True)
+combined_bls.to_csv('BLS Wage Data Processing/BLS_Wage_Processed_Data_All_Years.csv', index=False)
+
+# Save descriptive statistics to CSV
+stats_df = pd.DataFrame(stats_list)
+stats_df.to_csv('BLS Wage Data Processing/BLS_Wage_Descriptive_Stats_By_Year.csv', index=False)

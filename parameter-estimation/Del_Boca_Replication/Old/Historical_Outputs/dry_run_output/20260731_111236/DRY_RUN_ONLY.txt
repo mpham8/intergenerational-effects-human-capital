@@ -1,0 +1,7 @@
+Computational validation only; these are not substantive estimates.
+Input: /Users/joshualeinwand/Desktop/Summer/Expenditure Per Student/outputs/Fake_Merged_Data_with_cex_education_expenditure.csv
+Households: 1000
+Qualifying CEX observations by period: [675, 890, 934]
+Minimum CEX coverage: 0.5
+Julia threads: 10
+Stage-2 objective: 1.028273726983752
