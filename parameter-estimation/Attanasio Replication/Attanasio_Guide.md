@@ -52,8 +52,7 @@ install.packages(c(
   "minpack.lm",
   "Matrix",
   "foreign",
-  "scales",
-  "openxlsx"
+  "scales"
 ))
 ```
 
@@ -283,5 +282,4 @@ Wrote Rev3 technology bridge: .../attanasio_rev3_bridge.csv
 
 5. The output directory contains a three-row bridge and the period-specific
    CES, investment, regression, and factor-model files.
-
 

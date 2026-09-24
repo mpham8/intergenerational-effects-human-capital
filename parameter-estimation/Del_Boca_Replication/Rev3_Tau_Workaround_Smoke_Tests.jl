@@ -1,5 +1,6 @@
 using Test
 
+include(joinpath(@__DIR__, "Del_Boca_Prelim.jl"))
 include(joinpath(@__DIR__, "Julia_DelBoca_SMM.jl"))
 
 @testset "Attanasio-scale covariate transformations" begin
@@ -30,7 +31,7 @@ include(joinpath(@__DIR__, "Julia_DelBoca_SMM.jl"))
           exp.((log.(spending) .- mean(log.(spending))) ./ std(log.(spending)))
 end
 
-@testset "Rev3 data and methodology contracts" begin
+@testset "Rev3 tau-workaround data and methodology contracts" begin
     mixture = load_attanasio_mixture()
     @test length(mixture.probabilities) == 2
     @test sum(mixture.probabilities) ≈ 1.0
@@ -38,16 +39,21 @@ end
     @test all(size(covariance) == (22, 22) for covariance in mixture.covariances)
     @test all(minimum(eigvals(Symmetric(covariance))) >= -1e-8 for covariance in mixture.covariances)
 
-    data = load_rev3_data(maximum_households=100; seed=20260725)
-    repeated_data = load_rev3_data(maximum_households=100; seed=20260725)
+    data = load_rev3_tau_workaround_data(maximum_households=100; seed=20260725)
+    repeated_data = load_rev3_tau_workaround_data(maximum_households=100; seed=20260725)
     @test data.n_households == 100
-    @test data.source == :attanasio_mixture
+    @test data.source == :attanasio_mixture_tau_workaround
     @test sum(data.component_counts) == data.n_households
+    @test data.proposals > data.n_households
+    @test data.rejected_proposals == data.proposals - data.n_households
+    @test 0.0 < data.acceptance_rate < 1.0
     @test isequal(data.observed, repeated_data.observed)
+    @test data.proposals == repeated_data.proposals
     @test data.empirical_moments == repeated_data.empirical_moments
     @test all(isfinite, data.empirical_moments)
     @test all(isnan, data.observed[:, :, 4])
-    @test all((0.0 .<= data.observed[:, :, 6]) .& (data.observed[:, :, 6] .<= 1.0))
+    @test all((0.0 .< data.observed[:, :, 6]) .& (data.observed[:, :, 6] .<= 1.0))
+    @test maximum(data.observed[:, :, 6]) < 1.0
     @test all(isfinite, data.observed[:, :, 1:3])
     @test all(data.observed[:, :, 1:3] .> 0.0)
     @test all(data.observed[:, :, 5] .> 0.0)
@@ -89,7 +95,7 @@ end
 end
 
 @testset "Reduced DX-NES SMM" begin
-    data = load_rev3_data(maximum_households=40; seed=20260725)
+    data = load_rev3_tau_workaround_data(maximum_households=40; seed=20260725)
     set_true_technology!(test_true_technology())
     result = two_step_smm(
         data.empirical_moments,
@@ -105,4 +111,18 @@ end
     @test length(result.parameters) == 5
     @test isfinite(result.objective)
     @test all(isfinite, result.stage2_weighting)
+end
+
+@testset "Exported Attanasio bridge integration" begin
+    data = load_rev3_tau_workaround_data(maximum_households=20; seed=20260725)
+    exported_technology = load_and_set_true_technology!()
+    @test validate_true_technology(exported_technology) === exported_technology
+
+    solved = solve_households(copy(data.households), copy(parameters), 1)
+    simulated_moments = moments(solved)
+    @test size(solved) == size(data.households)
+    @test all(isfinite, solved)
+    @test all(isfinite, simulated_moments)
+    @test length(simulated_moments) == length(data.empirical_moments) == NUM_MOMENTS
+    @test isfinite(rev3_smm_objective(parameters, data.empirical_moments, data.households))
 end

@@ -1,0 +1,44 @@
+Full-sample Rev3 tau-workaround estimation run.
+This is a Del Boca-side partial correction; the bridge was not re-estimated.
+Input: /Users/joshualeinwand/intergenerational-effects-human-capital/parameter-estimation/Attanasio Replication/VDE DelBoca Export
+Households: 10000
+Mixture component counts: [5846, 4154]
+Mixture proposals: 38305
+Rejected proposals: 28305
+Acceptance rate: 0.26106252447461165
+Synthetic household seed: 20260728
+DX-NES evaluations per stage: 1000
+DX-NES population: 12
+Weighting draws: 20
+Adaptive-Metropolis iterations: 10000
+Julia threads: 4
+Stage-2 objective: 0.4842426030225859
+Total elapsed seconds: 13861.232304096222
+
+PRELIMINARY RESULTS: TAU WORKAROUND AND LIMITATIONS
+Tau is interpreted as a parental-time share bounded between zero and one.
+The exported Gaussian log-factor distribution can produce tau above one after
+exponentiation. This run rejected the entire joint household draw whenever
+any of its three log-tau values exceeded zero (equivalently, tau exceeded one),
+then drew another household. It did not clip those values to one.
+Of 38,305 proposals, 10,000 were retained (26.106%); 28,305 were rejected.
+These are household-sampling acceptance figures, not Metropolis acceptance figures.
+
+This samples the exported joint distribution conditional on feasible time shares.
+It can change income, investment, child human capital, their correlations, and
+mixture-component proportions as well as time itself. The procedure does not
+repair the upstream Attanasio time measurement, distinguish child-directed time
+from leisure, or re-estimate the production-function bridge. These estimates
+should therefore be treated as exploratory, not final substantive findings.
+
+The Excel Metropolis summaries use accepted proposals only and exclude repeated
+states after rejections. Correct summaries should use the full saved chain in
+the .jls file. The parameter-summary CSV reports optimizer estimates, not these
+Metropolis averages. Inferential scaling also remains to be validated.
+
+PACKAGING NOTE (September 23, 2026)
+This run folder was moved into parameter-estimation/prelim results/ and its
+five result files were renamed with the Del_Boca_Prelim_results prefix.
+The accompanying VDE DelBoca Export folder contains unchanged copies of the
+bridge and four mixture CSVs. Original input exports remain in place for scripts.
+Renaming and packaging did not rerun estimation or change numerical results.

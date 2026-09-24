@@ -1,4 +1,6 @@
-# Del Boca implementation shared by the SMM and adaptive Metropolis drivers.
+# Preliminary Del Boca implementation with the tau feasibility workaround.
+# The solver and estimator are unchanged; only synthetic household construction
+# conditions the exported mixture draws on feasible time shares.
 # Parent policies come from new_CES_solver, and DX-NES parallelizes candidate
 # evaluations while each candidate applies its solved policy serially.
 
@@ -9,7 +11,7 @@ using CSV
 using DataFrames
 using BlackBoxOptim
 using .Threads
-include(joinpath(@__DIR__, "Rev3_Data.jl"))
+include(joinpath(@__DIR__, "Rev3_Tau_Workaround_Data.jl"))
 include(joinpath(@__DIR__, "..", "..", "dsge-simulations", "new_CES_solver.jl"))
 
 # ---------------- CONSTANTS ------------------
@@ -107,14 +109,14 @@ function load_latent_factors(filepath::String)::Vector{Float64}
     # The exported Attanasio mixture replaces the old placeholder moments.
     # Drawing once with the configured seed keeps the empirical SMM target fixed
     # while DX-NES compares candidate preference and belief parameters.
-    return load_rev3_data(filepath).empirical_moments
+    return load_rev3_tau_workaround_data(filepath).empirical_moments
 end
 
 function create_households(num_households::Int)::Array{Float64, 3}
     # Draw all household states jointly from the exported Attanasio mixture.
     # This preserves its estimated dependence structure and gives every SMM
     # candidate the same synthetic households and underlying random draws.
-    return load_rev3_data(maximum_households=num_households).households
+    return load_rev3_tau_workaround_data(maximum_households=num_households).households
 end
 
 function child_hc_grid(initial_child_hc::Float64, parent_hc::Float64)::Vector{Float64}
@@ -360,7 +362,7 @@ function moments(households::Array{Float64, 3})::Vector{Float64}
         moments[i + 4*NUM_PERIODS] = std(households[:, i, moment_expenditure])
         moments[i + 5*NUM_PERIODS] = std(households[:, i, moment_child_hc])
     end
-    
+
     for i in 1:NUM_MOMENTS
         if moments[i] == 0
             # # FOR DEBUGGING PURPOSES
@@ -500,36 +502,36 @@ function simulate_10000_households()
     """
     # Number of households to simulate
     num_households = 5000
-    
+
     # Parameters for solving (same as in tests)
     simulation_parameters = [20.0, -0.2, 0.3, 0.2, 0.2]
-    
+
     # Start timing
     start_time = time()
-    
+
     # Create households
     println("Creating $num_households households...")
     households = create_households(num_households)
-    
+
     # Solve households (using all available workers)
     println("Solving households...")
     solved_households = solve_households(households, simulation_parameters, 0)
-    
+
     # Calculate elapsed time
     elapsed_time = time() - start_time
     println("Total execution time: $(round(elapsed_time, digits=3)) seconds")
-    
+
     # Prepare data for CSV
     # Create column names
     column_names = [:Household_ID, :Period]
     append!(column_names, [Symbol(replace(var, " " => "_")) for var in HOUSEHOLD_VARIABLES])
-    
+
     # Create empty vectors for each column
     column_data = [[] for _ in column_names]
-    
+
     # Create DataFrame with proper constructor
     output_data = DataFrame([name => (i <= 2 ? Int64[] : Float64[]) for (i, name) in enumerate(column_names)])
-    
+
     # Populate the DataFrame
     num_periods = size(solved_households, 2)
     for hh_id in 1:num_households
@@ -540,7 +542,7 @@ function simulate_10000_households()
             push!(output_data, row_data)
         end
     end
-    
+
     # Save to CSV
     output_file = "julia_households_results.csv"
     CSV.write(output_file, output_data, delim=",", writeheader=true)

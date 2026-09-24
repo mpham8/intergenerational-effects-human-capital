@@ -5,7 +5,6 @@ suppressMessages(library(corpcor))
 suppressMessages(library(minpack.lm))
 suppressMessages(library(Matrix))
 suppressMessages(library(scales))
-suppressMessages(library(openxlsx))
 
 #dir_data <- "C:/Users/kahna/Dropbox/OConnell 2025 Research/"
 setwd(dir_data)
@@ -18,18 +17,23 @@ if (!file.exists(data_file)) {
 }
 childPeriodData <- read.csv(data_file, header=TRUE, check.names=FALSE)
 
-# A dry run uses the same balanced three-period panel as the full pipeline but
-# limits the number of IDs before the expensive factor-model estimation. The
-# first sorted IDs make this deterministic across macOS and Windows.
+# Both full and dry runs use the same balanced three-period panel. A dry run
+# additionally keeps the first sorted IDs so sampling is deterministic across
+# macOS and Windows.
 dry_run_ids <- as.integer(Sys.getenv("IEHC_DRY_RUN_IDS", unset = "0"))
+period_sets <- lapply(0:2, function(p) {
+  unique(childPeriodData$id[childPeriodData$period == p])
+})
+balanced_ids <- sort(Reduce(intersect, period_sets))
 if (!is.na(dry_run_ids) && dry_run_ids > 0) {
-  period_sets <- lapply(0:2, function(p) unique(childPeriodData$id[childPeriodData$period == p]))
-  balanced_ids <- sort(Reduce(intersect, period_sets))
   selected_ids <- head(balanced_ids, dry_run_ids)
-  childPeriodData <- childPeriodData[
-    childPeriodData$period %in% 0:2 & childPeriodData$id %in% selected_ids,
-  ]
+} else {
+  selected_ids <- balanced_ids
 }
+childPeriodData <- childPeriodData[
+  childPeriodData$period %in% 0:2 & childPeriodData$id %in% selected_ids,
+]
+childPeriodData <- childPeriodData[order(childPeriodData$id, childPeriodData$period), ]
 
 standardize <- function(x, variable_name, period_label = "pooled") {
   x_mean <- mean(x, na.rm=TRUE)
@@ -58,14 +62,15 @@ cex_expenditure_column <-
   "CEX Cumulative Household Education Expenditure (Real 2026 Dollars)"
 cex_years_column <- "CEX Years Successfully Matched"
 cex_coverage_column <- "CEX Coverage Share"
-cex_required_columns <- c(
+required_input_columns <- c(
   cex_expenditure_column, cex_years_column, cex_coverage_column,
-  "LABOR_INCOME", "HRSWK_PCY"
+  "LABOR_INCOME", "HRSWK_PCY", "CHILD_EVER_ENROLLED_IN_HEAD",
+  "TCURELSC_per_student", "HGC_OF_MOTHER_AS_OF_MAY_1_R"
 )
-missing_cex_columns <- setdiff(cex_required_columns, names(childPeriodData))
-if (length(missing_cex_columns) > 0) {
-  stop(paste("Missing CEX cardinal-measure columns:",
-             paste(missing_cex_columns, collapse=", ")))
+missing_input_columns <- setdiff(required_input_columns, names(childPeriodData))
+if (length(missing_input_columns) > 0) {
+  stop(paste("Missing required Attanasio input columns:",
+             paste(missing_input_columns, collapse=", ")))
 }
 minimum_cex_coverage <- as.numeric(
   Sys.getenv("IEHC_MIN_CEX_COVERAGE", unset="0.5")
@@ -73,6 +78,14 @@ minimum_cex_coverage <- as.numeric(
 if (!is.finite(minimum_cex_coverage) || minimum_cex_coverage < 0 ||
     minimum_cex_coverage > 1) {
   stop("IEHC_MIN_CEX_COVERAGE must be between zero and one")
+}
+
+# The restricted NLSY extract reports Head Start exposure as the fraction of
+# the available enrollment period, rather than duration in months.
+observed_head_start <- is.finite(childPeriodData$CHILD_EVER_ENROLLED_IN_HEAD)
+if (any(childPeriodData$CHILD_EVER_ENROLLED_IN_HEAD[observed_head_start] < 0 |
+        childPeriodData$CHILD_EVER_ENROLLED_IN_HEAD[observed_head_start] > 1)) {
+  stop("CHILD_EVER_ENROLLED_IN_HEAD must be between zero and one")
 }
 
 childPeriodData$CEX_ANNUAL_INVESTMENT <- NA_real_
@@ -146,7 +159,7 @@ for (measure in names(period_normalized_measures)) {
 
 # Normalize observed production-function covariates over the pooled sample.
 childPeriodData <- transform(childPeriodData,
-    HOW_LONG_CHILD_WAS_IN_HEAD = standardize(HOW_LONG_CHILD_WAS_IN_HEAD, "HOW_LONG_CHILD_WAS_IN_HEAD"),
+    CHILD_EVER_ENROLLED_IN_HEAD = standardize(CHILD_EVER_ENROLLED_IN_HEAD, "CHILD_EVER_ENROLLED_IN_HEAD"),
     TCURELSC_per_student = standardize(ifelse(TCURELSC_per_student > 0, log(TCURELSC_per_student), NA), "TCURELSC_per_student"),
     HGC_OF_MOTHER_AS_OF_MAY_1_R = standardize(HGC_OF_MOTHER_AS_OF_MAY_1_R, "HGC_OF_MOTHER_AS_OF_MAY_1_R"),
     TNFI_TRUNC = standardize(ifelse(TNFI_TRUNC > 0, log(TNFI_TRUNC), NA), "TNFI_TRUNC"),
@@ -237,7 +250,7 @@ pinvest1 <- log(pmax(childPeriod0Data$CEX_ANNUAL_INVESTMENT, 1e-8))
 pinvest2 <- log(pmax(childPeriod1Data$CEX_ANNUAL_INVESTMENT, 1e-8))
 pinvest3 <- log(pmax(childPeriod2Data$CEX_ANNUAL_INVESTMENT, 1e-8))
 
-govinvest1 <- childPeriod0Data$HOW_LONG_CHILD_WAS_IN_HEAD
+govinvest1 <- childPeriod0Data$CHILD_EVER_ENROLLED_IN_HEAD
 govinvest2 <- childPeriod1Data$TCURELSC_per_student
 govinvest3 <- childPeriod2Data$TCURELSC_per_student
 
