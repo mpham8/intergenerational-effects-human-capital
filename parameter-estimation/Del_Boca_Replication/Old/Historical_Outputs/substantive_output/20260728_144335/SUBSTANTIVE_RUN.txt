@@ -1,0 +1,13 @@
+Full-sample substantive estimation run.
+Input: /Users/joshualeinwand/Desktop/Summer/Expenditure Per Student/outputs/Fake_Merged_Data_with_cex_education_expenditure.csv
+Households: 11551
+Qualifying CEX observations by period: [6396, 9735, 10796]
+Minimum CEX coverage: 0.5
+Attanasio bootstrap samples: 2
+DX-NES evaluations per stage: 1000
+DX-NES population: 12
+Weighting draws: 20
+Adaptive-Metropolis iterations: 10000
+Julia threads: 10
+Stage-2 objective: 0.5685070416264484
+Total elapsed seconds: 11756.382568120956

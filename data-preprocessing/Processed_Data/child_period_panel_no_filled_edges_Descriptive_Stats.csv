@@ -1,0 +1,82 @@
+,count,mean,std,min,25%,50%,75%,max,Category,Description
+id,57755.0,600544.2828326551,345110.7238403628,201.0,309501.0,604004.0,875703.0,1267501.0,Other,Unique identifier for each individual
+period,57755.0,1.0,1.4142258057453352,-1.0,0.0,1.0,2.0,3.0,,
+MPUBID_XRND,57755.0,6005.423166825383,3451.1074627970615,2.0,3095.0,6040.0,8757.0,12675.0,Other,Mother's public ID (cross-round)
+CRACE_XRND,57755.0,2.338239113496667,0.7803325214454374,1.0,2.0,3.0,3.0,3.0,Other,"Child's race (cross-round, categorical)"
+CSEX_XRND,57745.0,1.4893064334574422,0.4998899630002677,1.0,1.0,1.0,2.0,2.0,Other,"Child's sex (cross-round, categorical)"
+CYRB_XRND,57755.0,1986.1033676737945,6.426807599670453,1970.0,1981.0,1985.0,1990.0,2014.0,Other,Child's year of birth
+HGC_OF_MOTHER_AS_OF_MAY_1_R,48636.0,12.473157873521263,2.4784876855932327,0.0,12.0,12.0,14.0,20.0,Parent_Characteristics,"Mother's highest grade completed as of May 1, answered yearly (number of years in school)"
+HOW_MANY_BOOKS,10231.0,14.607464894275568,6.077912089825709,0.0,10.0,17.5,20.0,20.0,Monetary_Investment,Number of books in the home
+HOW_OFTEN_MOM_READS,8610.0,2.37284788018232,1.980052088385082,0.0,1.0,2.0,3.0,7.0,Time_Investment,"How often mother reads to child (frequency, times per week)"
+HOW_OFT_CH_EATS_W,9823.0,5.838946661089234,4.235150002224176,0.0,2.5,5.6,7.7,14.0,Time_Investment,"How often child eats with family (frequency, times per week)"
+MOM_HELPS_CH_LEARN_NUMBERS,3736.0,0.9884903640256959,0.10005885087831079,0.0,1.0,1.0,1.0,1.0,Time_Investment,Mother helps child learn numbers (yes/no)
+MOM_HELPS_CH_LEARN_ALPHABET,3663.0,0.9846209846209847,0.11385094519072571,0.0,1.0,1.0,1.0,1.0,Time_Investment,Mother helps child learn alphabet (yes/no)
+MOM_HELPS_CH_LEARN_COLORS,3731.0,0.986598767086572,0.10666910257341447,0.0,1.0,1.0,1.0,1.0,Time_Investment,Mother helps child learn colors (yes/no)
+MOM_HELPS_CH_LEARN_SHAPES,3381.0,0.9593808537907916,0.18612229859874682,0.0,1.0,1.0,1.0,1.0,Time_Investment,Mother helps child learn shapes (yes/no)
+HOW_OFT_CH_TAKEN_TO_MUSEUM,11316.0,0.07252162620028052,0.10916260491270476,0.0,0.014423076923076922,0.028846153846153848,0.1125091746333835,1.0,Time_Investment,"How often child is taken to a museum (frequency, times per week)"
+MUSIC_INSTMT_CH,10209.0,0.4862170225617919,0.443637891195169,0.0,0.0,0.5,1.0,1.625,Monetary_Investment,Child plays a musical instrument (yes/no)
+CH_GET_SPEC_LESSON,10199.0,0.597899303853319,0.41902818313494733,0.0,0.0,0.7,1.0,1.8,Monetary_Investment,Child receives special lessons (yes/no)
+HOW_OFT_CH_TAKEN_TO_PERFORMANCE,10191.0,0.0528934253550841,0.09412924661651165,0.0,0.0,0.028846153846153844,0.08058334070992298,1.0,Time_Investment,"How often child is taken to performances (frequency, times per week)"
+HOW_OFT_CH_SPEND_TIME_W_DAD,9812.0,2.1138390915885306,1.5026356468719844,1.0,1.0,1.4,3.0,7.0,Time_Investment,"How often child spends time with father (frequency, times per week)"
+HOW_OFT_CH_W_DAD_OUTDOORS,8835.0,2.724781634525609,2.378748688457131,0.05769230769230769,0.7644230769230769,2.1150747986191023,4.0,7.0,Time_Investment,"How often child spends time outdoors with father (frequency, times per week)"
+DO_PARS_DISCUSS_TV,10096.0,0.7936612684891707,0.3434179313010168,0.0,0.55,1.0,1.0,1.0,Time_Investment,Do parents discuss TV programs with child (yes/no)
+PIAT_MATH,13195.0,38.716976127320955,16.896942486494602,0.0,28.0,40.5,49.0,84.0,Child_Human_Capital,Child's PIAT math score (total raw score)
+PIAT_READ_REC,13146.0,41.972894162990016,19.007684424764054,0.0,29.0,42.0,55.0,84.0,Child_Human_Capital,Child's PIAT reading recognition score (total raw score)
+PIAT_READ_COMP,13010.0,37.82519536254164,16.093013146354824,0.0,26.5,39.0,48.5,84.0,Child_Human_Capital,Child's PIAT reading comprehension score (total raw score)
+PPVT,13001.0,73.40067558905726,29.67509043979114,0.0,49.5,75.5,96.66666666666666,169.0,Child_Human_Capital,Child's Peabody Picture Vocabulary Test score (total raw score)
+CHILD_EVER_ENROLLED_IN_HEAD,14432.0,0.16003066103104213,0.35031555361484823,0.0,0.0,0.0,0.0,1.0,Government_Inputs,Child ever enrolled in Head Start (yes/no)
+HOW_LONG_CHILD_WAS_IN_HEAD,2405.0,15.02841735966736,6.768569533598019,1.5,7.0,17.5,19.125,24.0,Government_Inputs,Duration child was in Head Start (years/months)
+IF_LOW_GRADES,8964.0,4.216577374312064,1.1512257623756899,1.0,4.0,5.0,5.0,5.0,Time_Investment,"If low grades, mother would help child with schoolwork (1 = very likely, 5 = not at all likely)"
+TYPE_OF_SCHOOL,10033.0,1.486149872088774,1.2722644284424636,1.0,1.0,1.0,1.0,11.0,Educational_Support,Type of school attended by child (categorical)
+CH_ATTENDS_PUBLIC_PRIV_RELI,13849.0,1.1554253100619265,0.45784730501239945,1.0,1.0,1.0,1.0,4.0,Educational_Support,"Child attends public, private, or religious school (categorical)"
+CHILD_AGE_WHEN_1ST_ATTD_HEA,1174.0,3.603385860306644,0.7328776772828974,0.0,3.0,4.0,4.0,6.0,Government_Inputs,Child's age when first attended Head Start (years)
+IS_SCHOOL_GIFTED_HANDICAPPED,5886.0,1.161208800543663,0.6963872208209362,1.0,1.0,1.0,1.0,5.0,Educational_Support,School is for gifted/handicapped children (yes/no)
+OWN_A_HOME_COMPUTER,4922.0,0.5003775565488283,0.4649459842123101,0.0,0.0,0.5,1.0,1.0,Monetary_Investment,Home has a computer (yes/no)
+PARS_HELP_W_HOMEWORK,7045.0,0.46042546640412085,0.491675721889984,0.0,0.11507479861910243,0.23014959723820483,0.8075373993095512,1.5,Time_Investment,"Parents help child with homework (frequency, times per week)"
+DOES_CHILD_USE_ANY_COMPUTER,2383.0,0.899664288711708,0.27337776724417956,0.0,1.0,1.0,1.0,1.0,Monetary_Investment,Child uses any computer (yes/no)
+MOMHGC_EVER_XRND,57740.0,12.931849670938691,2.6000705701105753,0.0,12.0,12.0,14.0,20.0,Parent_Characteristics,Mother's highest grade completed ever (cross-round)
+HGC_YEARLY_CHILD,8094.0,9.180578206078575,2.92795255090783,1.0,9.0,10.0,10.5,95.0,Educational_Attainment,Child's highest grade completed each year (years)
+HGC_DLI_XRND,43365.0,5.4321457396517925,2.6086375863974505,1.0,3.0,6.0,7.0,14.0,Educational_Attainment,Highest grade completed ever (cross-round)
+ASSOCIATES_XRND,43365.0,0.14850686037126715,0.355605805445509,0.0,0.0,0.0,0.0,1.0,Educational_Attainment,Child ever received associate's degree (yes/no)
+BA_XRND,43365.0,0.11161074599331258,0.31489057451483315,0.0,0.0,0.0,0.0,1.0,Educational_Attainment,Child ever received bachelor's degree (yes/no)
+BS_XRND,43365.0,0.13789922748760522,0.3447981613354824,0.0,0.0,0.0,0.0,1.0,Educational_Attainment,Child ever received bachelor of science degree (yes/no)
+MASTERS_XRND,43365.0,0.05672777585610515,0.23132438105245479,0.0,0.0,0.0,0.0,1.0,Educational_Attainment,Child ever received master's degree (yes/no)
+PROFDEGREE_XRND,43365.0,0.006226219301279834,0.07866127497633423,0.0,0.0,0.0,0.0,1.0,Educational_Attainment,Child ever received professional degree (yes/no)
+UNEMPR_TOTAL,5231.0,4553.764246172969,8446.403626837277,0.0,1044.287432006871,2513.8892785571143,5496.371099601802,221097.55511022045,,Total unemployment compensation received by R (USD)
+UNEMPSP_TOTAL,4125.0,5017.030078867006,9369.770441679473,0.0,1359.074720870312,2922.754652161466,5807.326653306614,311073.5470941884,,Total unemployment compensation received by spouse (USD)
+AFDC_TOTAL,9748.0,5577.046941075012,6364.533058463632,0.0,2276.110649871171,4464.432293157744,7427.524191239623,200137.49098196396,,Total Aid to Families with Dependent Children (AFDC) received by R (USD)
+FDSTMPS_TOTAL,14975.0,2985.52811816082,3078.3739960510457,0.0,1121.9822025002386,2342.434392594713,4036.407887202978,74920.52447752649,,Total food stamps received by R (USD)
+SSI_TOTAL,6060.0,5957.303184955588,7061.242191482964,0.0,2040.8420984826798,4558.235900372173,7576.744963140567,200137.49098196396,,Total Supplemental Security Income (SSI) received by R (USD)
+WELFARE_AMT,16641.0,6925.258783341105,7651.88864306749,0.0,1989.924724448898,4959.901423626474,9665.383338104783,200838.25250501002,,"Aggregation of AFDC_TOTAL, FDSTMPS_TOTAL, and SSI_TOTAL (defined as 'WELFARE' by the survey) (USD)"
+MOTHER_BIRTH_MONTH,4548.0,6.354221635883905,3.3988566475796467,1.0,3.0,6.0,9.0,12.0,,"Month of mother's birth (month, 1-12)"
+MOTHER_BIRTH_YEAR,4548.0,59.3698328935796,1.9865152437127724,56.0,58.0,59.0,61.0,64.0,,Year of mother's birth (year)
+SPOUSE_WKSWK_PCY,35479.0,46.74413241767654,10.680128897043886,0.0,47.6,51.75,52.0,52.0,Time_Investment,Spouse's weeks worked per year (weeks)
+SPOUSE_HRSWK_PCY,34900.0,43.66994111194507,10.601889260101137,0.0,40.0,41.5,48.5,122.4,Time_Investment,Spouse's hours worked per year (hours)
+LABOR_INCOME,48129.0,30368.54440526114,54084.719164546645,0.0,806.4939402614755,11236.472945891783,38063.913541368456,1125711.035213284,Time_Investment,"Income from wages, salary, commissions, and tips before taxes (USD)"
+MOM_RACE,57755.0,2.338239113496667,0.7803325214454374,1.0,2.0,3.0,3.0,3.0,Parent_Characteristics,"Mother's race (encoded, categorical). 1 = Hispanic, 2 = Black, 3 = Other"
+URBAN_RURAL,47982.0,0.7696037819398662,0.3940260833224173,0.0,0.6666666666666666,1.0,1.0,1.0,Parent_Characteristics,"Urban or rural residence (categorical). 1 = Urban, 0 = Rural"
+WKSWK_PCY,48895.0,29.931474661667874,20.623958046286553,0.0,7.8,35.0,51.4,52.5,Time_Investment,Weeks worked per year (weeks)
+HRSWK_PCY,48757.0,1127.1645439255199,896.8639577173349,0.0,204.0,1109.5,1960.0,8625.5,Time_Investment,Hours worked per week (hours)
+HGC_REV_MOM,48905.0,12.479050045196146,2.4794342529477382,0.0,12.0,12.0,14.0,20.0,Parent_Characteristics,"Mother's highest grade completed (revised, years in school)"
+TNFI_TRUNC,46066.0,100887.58420168454,166470.61391562183,0.0,21471.949255654166,49685.76723303752,113771.68336673349,3074611.1566784466,Time_Investment,Total net family income (from NLSY79) (USD)
+ASVAB_1,3541.0,51.15052245128495,1.156505980485943,51.0,51.0,51.0,51.0,67.0,Parent_Characteristics,ASVAB: normal/altered testing (categorical)
+ASVAB_2,3527.0,0.4729231641621775,0.49933709946744664,0.0,0.0,0.0,1.0,1.0,Parent_Characteristics,ASVAB: high school graduate status (yes/no)
+ASVAB_3,3541.0,12.125670714487432,4.716334056230379,0.0,9.0,12.0,15.0,25.0,Parent_Characteristics,ASVAB: section 1 - general science
+ASVAB_4,3541.0,12.802598136119741,6.184019319398759,0.0,8.0,11.0,17.0,30.0,Parent_Characteristics,ASVAB: section 2 - arithmetic reasoning
+ASVAB_5,3541.0,20.63908500423609,8.719559651638288,0.0,14.0,21.0,28.0,35.0,Parent_Characteristics,ASVAB: section 3 - word knowledge
+ASVAB_6,3541.0,9.010166619598984,3.8530798453008948,0.0,6.0,10.0,12.0,15.0,Parent_Characteristics,ASVAB: section 4 - paragraph comprehension
+ASVAB_7,3541.0,28.810223100818977,11.711292415227183,0.0,21.0,29.0,38.0,50.0,Parent_Characteristics,ASVAB: section 5 - numerical operations
+ASVAB_8,3541.0,40.81022310081898,17.683712621190608,0.0,29.0,43.0,53.0,84.0,Parent_Characteristics,ASVAB: section 6 - coding speed
+ASVAB_9,3541.0,9.480090369951991,4.000912550252607,0.0,7.0,9.0,12.0,25.0,Parent_Characteristics,ASVAB: section 7 - auto and shop information
+ASVAB_10,3541.0,9.223665631177633,4.821879770945563,0.0,6.0,8.0,12.0,25.0,Parent_Characteristics,ASVAB: section 8 - mathematics knowledge
+ASVAB_11,3541.0,9.844111832815589,4.045921072554801,0.0,7.0,9.0,12.0,25.0,Parent_Characteristics,ASVAB: section 9 - mechanical comprehension
+ASVAB_12,3541.0,8.155040948884496,3.6525620803961116,0.0,5.0,8.0,11.0,20.0,Parent_Characteristics,ASVAB: section 10 - electronics information
+AFQT_1,3525.0,30.27177304964539,25.298589426354084,1.0,10.0,23.0,46.0,99.0,Parent_Characteristics,Armed Forces Qualification Test (AFQT) percentile score - 1980
+AFQT_2,3525.0,29.269787234042553,24.267781270958903,1.0,9.0,23.0,44.0,99.0,Parent_Characteristics,Armed Forces Qualification Test (AFQT) percentile score - revised 1989
+AFQT_3,3541.0,29202.89579214911,24338.26188254682,0.0,8808.0,23290.0,43456.0,99785.0,Parent_Characteristics,Armed Forces Qualification Test (AFQT) percentile score - revised 2006
+HGC_EVER_MOM_XRND,57740.0,12.931849670938691,2.6000705701105753,0.0,12.0,12.0,14.0,20.0,Parent_Characteristics,"Highest grade completed ever (cross-round, years of schooling)"
+HIGHEST_DEGREE_EVER_MOM_XRND,49535.0,1.8577773291611992,1.4206586896390059,1.0,1.0,1.0,2.0,8.0,Parent_Characteristics,"Highest degree ever received (cross-round, categorical)"
+NUM_OLDER_SIBLINGS,57755.0,0.953943381525409,1.138026764764027,0.0,0.0,1.0,1.0,10.0,,"Number of older siblings, based on ID's in NLSCYA (count)"
+NUM_CHILDREN,57755.0,2.9319539433815254,1.4287366977154514,1.0,2.0,3.0,4.0,11.0,,"Total number of children in the family, based on ID's in NLSCYA (count)"
+TRANSFER_INCOME,23467.0,6437.686359246957,8601.213927055353,0.0,1612.5041988739385,4265.729172630977,8826.229227936394,311052.11222444894,Government_Inputs,"Total income received from government transfers (aggregation of UNEMPR_TOTAL, UNEMPSP_TOTAL, WELFARE_AMT) (USD)"
+MOTHER_AGE,4630.0,1922.4864470842333,9.392620183019774,1915.0,1920.0,1921.0,1923.0,1986.0,,Mother's age at survey year (years)
