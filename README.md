@@ -19,8 +19,10 @@ This is the `cleanup` branch, based on preprocessing commit `8bd1e5b` (`first ro
 | `dsge-simulations/new_CES_solver.jl` | Actual policy solver used by this run. |
 | `parameter-estimation/Project.toml` and `Manifest.toml` | Existing Julia environment; dependencies were not re-resolved for cleanup. |
 | Six R files in `parameter-estimation/Attanasio Replication/` | Master, measurement specification, factor estimator, EM helper, procedures, and income-instrument production specification for upstream source inspection. |
+| `parameter-estimation/Attanasio Replication/Attanasio_Guide.md` | Existing Attanasio architecture and running guide. |
+| `parameter-estimation/Attanasio Replication/Old/Our_Production_Functions_No4.r` | Archived alternate production specification, retained for upstream comparisons; not called by the current master. |
 
-Older implementations, benchmarks, historical runs, the DSGE notebook, preprocessing datasets, duplicate export copies, V2 and the handoff are not included. The six R scripts do not establish which exact source version was executed inside the VDE; compare that version before attributing problems to transformations.
+Older Del Boca implementations, benchmarks, historical generated runs, the DSGE notebook, preprocessing datasets, duplicate export copies, V2 and the handoff are not included. All seven Attanasio source scripts (six active plus one archived alternative), the guide, and the five current exports are included. These sources do not establish which exact source version was executed inside the VDE; compare that version before attributing problems to transformations.
 
 ## Start With Small Checks
 
