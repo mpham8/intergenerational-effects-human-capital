@@ -12,10 +12,11 @@ if (nzchar(configured_script_dir)) {
   dir <- normalizePath(getwd(), mustWork = TRUE)
 }
 
-# All machine-specific paths are environment overrides. The defaults make the
-# current Mac checkout runnable; on the Windows VDE only these variables need
-# to change, rather than the source code.
-default_data_file <- "/Users/joshualeinwand/Desktop/Summer/Expenditure Per Student/outputs/Fake_Merged_Data_with_cex_education_expenditure.csv"
+# Default to the bundled fake data; the VDE input remains an environment override.
+default_data_file <- normalizePath(file.path(
+  dir, "..", "..", "data-preprocessing", "Fake Merged Data",
+  "Fake_Merged_Data_with_cex_education_expenditure.csv"
+), mustWork = FALSE)
 data_file <- Sys.getenv("IEHC_NLSY_DATA_FILE", unset = default_data_file)
 dir_output <- Sys.getenv(
   "IEHC_ATTANASIO_OUTPUT_DIR",
@@ -84,4 +85,4 @@ source ("Our_Estimate_FactorModel.R") # This file estimates the joint distributi
 
 #Estimate production function parameters using only prices as instruments, income is in the production function
 setwd(dir)
-source("Our_Production_Functions_No4_Incomeinst.R")
+source("Our_Production_Functions_No4_Incomeinst.r")

@@ -10,7 +10,7 @@ suppressMessages(library(scales))
 setwd(dir_data)
 data_file <- Sys.getenv(
   "IEHC_NLSY_DATA_FILE",
-  unset = "/Users/joshualeinwand/Desktop/Summer/Expenditure Per Student/outputs/Fake_Merged_Data_with_cex_education_expenditure.csv"
+  unset = default_data_file
 )
 if (!file.exists(data_file)) {
   stop(paste("NLSY input file not found:", data_file))
