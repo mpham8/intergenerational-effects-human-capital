@@ -3,6 +3,7 @@ using DataFrames
 using LinearAlgebra
 using Random
 using Statistics
+using SHA
 
 const DEFAULT_IEHC_NLSY_DATA_FILE = normpath(
     joinpath(
@@ -101,6 +102,7 @@ function validate_true_technology(technology::TrueCESTechnology)
 end
 
 function load_true_technology(filepath::String=attanasio_bridge_file())
+    validate_attanasio_bundle(dirname(filepath))
     isfile(filepath) || error(
         "Attanasio bridge not found at $filepath. Run the Attanasio stage before Rev3.",
     )
@@ -389,6 +391,7 @@ function validated_covariance(table::DataFrame, component::Int)
 end
 
 function load_attanasio_mixture(export_dir::String=attanasio_output_dir())
+    validate_attanasio_bundle(export_dir)
     isdir(export_dir) || error("Attanasio export directory not found at $export_dir.")
     required_files = vcat(
         [MIXTURE_PROBABILITIES_FILENAME, MIXTURE_MEANS_FILENAME],
@@ -436,6 +439,29 @@ function load_attanasio_mixture(export_dir::String=attanasio_output_dir())
         covariances=covariances,
         factors=factors,
     )
+end
+
+function validate_attanasio_bundle(export_dir::String)
+    isfile(joinpath(export_dir, "rev3_export_in_progress")) &&
+        error("Attanasio bundle export is incomplete; rerun the R export.")
+    manifest_path = joinpath(export_dir, "rev3_export_manifest.csv")
+    # Preserve compatibility with the disclosure-approved historical VDE bundle.
+    isfile(manifest_path) || return nothing
+    manifest = CSV.read(manifest_path, DataFrame; types=String)
+    required_columns = ["schema_version", "run_id", "created_utc", "input_file", "input_sha256", "file", "sha256"]
+    names(manifest) == required_columns || error("Invalid Attanasio export manifest columns.")
+    expected = vcat([REV3_BRIDGE_FILENAME, MIXTURE_PROBABILITIES_FILENAME, MIXTURE_MEANS_FILENAME],
+                    MIXTURE_COVARIANCE_FILENAMES)
+    nrow(manifest) == length(expected) && Set(manifest.file) == Set(expected) ||
+        error("Attanasio manifest must cover the complete five-file bundle.")
+    all(==("1"), manifest.schema_version) && length(unique(manifest.run_id)) == 1 ||
+        error("Unsupported or mixed Attanasio export runs.")
+    for row in eachrow(manifest)
+        path = joinpath(export_dir, row.file)
+        isfile(path) && bytes2hex(sha256(read(path))) == row.sha256 ||
+            error("Attanasio export checksum mismatch: $(row.file). Rerun the complete R export.")
+    end
+    return manifest
 end
 
 function draw_attanasio_log_factors(

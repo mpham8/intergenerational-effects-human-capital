@@ -22,12 +22,15 @@ dir_output <- Sys.getenv(
   "IEHC_ATTANASIO_OUTPUT_DIR",
   unset = file.path(dir, "Our Most Recent Output")
 )
+data_file <- normalizePath(path.expand(data_file), mustWork = TRUE)
+dir_output <- path.expand(dir_output)
 dir_data <- dirname(data_file)
 
 if (!file.exists(data_file)) {
   stop(paste("IEHC_NLSY_DATA_FILE does not exist:", data_file))
 }
 dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
+dir_output <- normalizePath(dir_output, mustWork = TRUE)
 
 
 
@@ -78,6 +81,8 @@ source("Our_estim_meas_model.R")
 
 bsample <- as.integer(Sys.getenv("IEHC_BOOTSTRAP_SAMPLES", unset = "2"))
 Bootstrap          <- as.integer(Sys.getenv("IEHC_RUN_BOOTSTRAP", unset = "1"))
+if (!Bootstrap %in% 0:1) stop("IEHC_RUN_BOOTSTRAP must be 0 or 1.")
+if (Bootstrap == 1L && (is.na(bsample) || bsample < 2L)) stop("At least two bootstrap samples are required.")
 onlyboot           <- 0                   # 1 if we only want to perform the bootstrap; 0 if we want to estimate the model on true data and bootstrap data
 
 setwd(dir)

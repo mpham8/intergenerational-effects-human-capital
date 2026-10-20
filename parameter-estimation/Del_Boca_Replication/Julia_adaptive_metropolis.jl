@@ -38,6 +38,7 @@ using DataFrames
 using XLSX
 using Plots
 using Serialization
+using SHA
 
 # Import the shared SMM orchestration; it loads Rev3 and threaded DX-NES.
 if !isdefined(@__MODULE__, :two_step_smm)
@@ -213,19 +214,30 @@ function SMMAdaptiveMetropolis(;
     )
 
     init_params = something(initial_params, copy(parameters))
+    length(param_names) == length(param_bounds) == length(init_params) ||
+        error("Parameter names, bounds and initial values must have equal lengths.")
+    all(isfinite, init_params) || error("Initial parameters must be finite.")
+    all(lo < hi && lo <= x <= hi for (x, (lo, hi)) in zip(init_params, param_bounds)) ||
+        error("Invalid bounds or initial parameters outside bounds.")
+    1 < initial_households <= max_households || error("Invalid household counts.")
+    adaptation_start_time >= 2 || error("adaptation_start_time must be at least two.")
+    proposal_strategy in ("adaptive", "mixed", "custom") || error("Unknown proposal strategy.")
     
     # Initialize random state
     rng = if random_seed !== nothing 
         Random.seed!(random_seed)
         Random.MersenneTwister(random_seed)
     else
-        Random.GLOBAL_RNG
+        Random.MersenneTwister(rand(Random.RandomDevice(), UInt))
     end
     
     # Initialize simulation
     simulated_households = households === nothing ?
                            create_households(initial_households) : copy(households)
     num_current_households = size(simulated_households, 1)
+    1 < num_current_households <= max_households || error("Household sample exceeds configured limits.")
+    size(simulated_households, 2) == NUM_PERIODS && size(simulated_households, 3) == 7 ||
+        error("Expected households with dimensions N by $NUM_PERIODS by 7.")
 
     # Load or generate empirical moments
     # NOTE: once we have empirical moments, these lines need to be changed
@@ -240,6 +252,12 @@ function SMMAdaptiveMetropolis(;
     
     if !isempty(custom_dists)
         validate_custom_proposals(custom_dists, param_names)
+        for (i, name) in enumerate(param_names)
+            if haskey(custom_dists, name)
+                isfinite(custom_proposal_logpdf(custom_dists[name], init_params[i], init_params[i])) ||
+                    error("Initial $name is outside its proposal support.")
+            end
+        end
     end
 
     # Initialize chain storage
@@ -329,6 +347,8 @@ end
 
 function check_parameter_constraints(estimator::SMMAdaptiveMetropolis, params::Vector{Float64})
     """Check whether parameters satisfy the Rev3 bounds."""
+    length(params) == length(estimator.parameter_bounds) || return false
+    all(isfinite, params) || return false
     # Check individual bounds
     for (i, (param, (lower, upper))) in enumerate(zip(params, estimator.parameter_bounds))
         if param < lower || param > upper
@@ -361,13 +381,13 @@ end
 
 function update_adaptive_covariance!(estimator::SMMAdaptiveMetropolis)
     """Update covariance matrix for adaptive proposals."""
-    if length(estimator.accepted_chain) < estimator.adaptation_start
+    if length(estimator.chain) < max(2, estimator.adaptation_start)
         return
     end
         
     # Convert to matrix
     # In Julia, we use hcat to convert vector of vectors to matrix, and transpose with '.
-    chain_array = hcat(estimator.accepted_chain[end-estimator.adaptation_start+1:end]...)'
+    chain_array = hcat(estimator.chain...)'
     
     # Compute empirical covariance
     # TODO: if this is a time-intensive step, use Haario et al. (2001)'s recursive formula for it
@@ -393,7 +413,8 @@ end
 # TODO: check this function in more detail and make sure it's in line with Haario et al. (2001)
 function should_increase_households(estimator::SMMAdaptiveMetropolis)
     """Determine if household count should be increased."""
-    if (estimator.num_current_households >= estimator.num_max_households || 
+    if (estimator.is_second_stage || estimator.current_iteration >= estimator.adaptation_start ||
+        estimator.num_current_households >= estimator.num_max_households ||
         length(estimator.parameter_std_history) < 5)
         return false
     end
@@ -424,16 +445,25 @@ function increase_household_count!(estimator::SMMAdaptiveMetropolis)
     # NOTE: we should probably just add to the old households, but this is easier logic-wise
     estimator.simulated_households = create_households(estimator.num_current_households)
     estimator.increase_household_spacer = 0
+    # The current state must be evaluated on the replacement sample before
+    # another Metropolis comparison; past losses refer to their original sample.
+    if !isempty(estimator.chain)
+        estimator.smm_values[end] = compute_smm_objective(estimator, estimator.chain[end])
+        isempty(estimator.household_count_history) ||
+            (estimator.household_count_history[end] = estimator.num_current_households)
+    end
     println("Increased household count from $old_count to $(estimator.num_current_households)")
 end
 
 function compute_diagnostics(estimator::SMMAdaptiveMetropolis)
     """Compute chain diagnostics."""
-    if length(estimator.accepted_chain) < 100
+    if length(estimator.chain) < 100
         return Dict{String, Any}()
     end
         
-    chain_array = hcat(estimator.accepted_chain...)'
+    burnin = max(100, estimator.adaptation_start, length(estimator.chain) ÷ 5)
+    length(estimator.chain) - burnin >= 100 || return Dict{String, Any}()
+    chain_array = hcat(estimator.chain[burnin+1:end]...)'
     diagnostics = Dict{String, Any}()
     
     # Acceptance rate
@@ -503,7 +533,7 @@ function propose_parameters(estimator::SMMAdaptiveMetropolis, current_params::Ve
             current_params, estimator.parameter_names, estimator.custom_proposal_dists,
             estimator.covariance_matrix, 
             use_adaptive=(estimator.covariance_matrix !== nothing && 
-                        length(estimator.accepted_chain) > estimator.adaptation_start),
+                        length(estimator.chain) > estimator.adaptation_start),
             estimator.rng
         )
     else  # "adaptive"
@@ -511,7 +541,7 @@ function propose_parameters(estimator::SMMAdaptiveMetropolis, current_params::Ve
             current_params, estimator.parameter_names, estimator.custom_proposal_dists,
             estimator.covariance_matrix,
             use_adaptive=(estimator.covariance_matrix !== nothing && 
-                        length(estimator.accepted_chain) > estimator.adaptation_start),
+                        length(estimator.chain) > estimator.adaptation_start),
             estimator.rng
         )
     end
@@ -539,7 +569,10 @@ function run_mcmc!(estimator::SMMAdaptiveMetropolis;
     Dict with results and diagnostics
     """
     
+    n_iterations >= 0 || error("n_iterations must be nonnegative.")
+    save_every > 0 || error("save_every must be positive.")
     println("Starting MCMC chain for $n_iterations iterations...")
+    println("Chain dispersion is descriptive: exp(-loss/2) has no validated inferential scale.")
     println("Stage: $(estimator.is_second_stage ? "Second (with optimal weights)" : "First (identity weights)")")
     
     # Initialize current parameters
@@ -574,12 +607,11 @@ function run_mcmc!(estimator::SMMAdaptiveMetropolis;
             proposal_smm = compute_smm_objective(estimator, proposal)
             
             # Metropolis acceptance step (convert SMM to pseudo-likelihood)
-            log_alpha = -0.5 * (proposal_smm - current_smm)
-            alpha = min(1.0, exp(log_alpha))
-            
-            if rand(estimator.rng) < alpha
+            log_alpha = -0.5 * (proposal_smm - current_smm) +
+                        proposal_log_ratio(estimator, current_params, proposal)
+
+            if log(rand(estimator.rng)) < min(0.0, log_alpha)
                 # Accept proposal
-                println("We finally accepted a proposal!")
                 current_params = copy(proposal)
                 current_smm = proposal_smm
                 push!(estimator.accepted_chain, current_params)
@@ -604,14 +636,15 @@ function run_mcmc!(estimator::SMMAdaptiveMetropolis;
         push!(estimator.household_count_history, estimator.num_current_households)
         
         # Track parameter standard deviations
-        if length(estimator.accepted_chain) > 50
-            recent_chain = hcat(estimator.accepted_chain[end-49:end]...)'
+        if length(estimator.chain) > 50
+            recent_chain = hcat(estimator.chain[end-49:end]...)'
             param_stds = std(recent_chain, dims=1)[:]
             push!(estimator.parameter_std_history, param_stds)
             
             # Check if we should increase household count
             if should_increase_households(estimator)
                 increase_household_count!(estimator)
+                current_smm = estimator.smm_values[end]
             end
         end
             
@@ -695,6 +728,10 @@ function run_two_step_smm!(estimator::SMMAdaptiveMetropolis;
     stage2_iterations > 0 || error("stage2_iterations must be positive.")
     weighting_draws >= 2 || error("At least two weighting draws are required.")
     
+    if estimator.num_current_households < estimator.num_max_households
+        estimator.simulated_households = create_households(estimator.num_max_households)
+        estimator.num_current_households = estimator.num_max_households
+    end
     lower_bounds = first.(estimator.parameter_bounds)
     upper_bounds = last.(estimator.parameter_bounds)
 
@@ -782,16 +819,17 @@ function run_two_step_smm!(estimator::SMMAdaptiveMetropolis;
 end
             
 function get_parameter_estimates(estimator::SMMAdaptiveMetropolis)
-    """Get parameter estimates and standard errors."""
+    """Descriptive summaries of the loss-based chain; not calibrated standard errors."""
         
-    if isempty(estimator.accepted_chain)
+    if isempty(estimator.chain)
         return Dict{String, Any}()
     end
     
-    chain_array = hcat(estimator.accepted_chain...)'
+    chain_array = hcat(estimator.chain...)'
     
-    # Remove burnin (first 20% of samples)
-    burnin = max(100, size(chain_array, 1) ÷ 5)
+    # Burn-in uses iterations, including rejected moves. Exclude sample-size
+    # warmup and covariance warmup from the descriptive chain summaries.
+    burnin = max(100, estimator.adaptation_start, size(chain_array, 1) ÷ 5)
     post_burnin = chain_array[burnin+1:end, :]
     if size(post_burnin, 1) < 100 
         println("Too few results to get accurate estimates.")
@@ -819,22 +857,8 @@ end
 function save_checkpoint(estimator::SMMAdaptiveMetropolis, prefix::String = "smm_checkpoint")
     """Save current state for resuming later."""
     
-    # Save heavy data to serialization
-    pickle_data = Dict(
-        "chain" => estimator.chain,
-        "accepted_chain" => estimator.accepted_chain,
-        "smm_values" => estimator.smm_values,
-        "covariance_matrix" => estimator.covariance_matrix,
-        "weighting_matrix" => estimator.weighting_matrix,
-        "empirical_moments" => estimator.empirical_moments,
-        "parameter_std_history" => estimator.parameter_std_history,
-        "computation_times" => estimator.computation_times
-    )
-    
-    open("$(prefix)_data.jls", "w") do f
-        serialize(f, pickle_data)
-    end
-        
+    save_checkpoint_data(estimator, "$(prefix)_data.jls")
+
     # Save important scalars and diagnostics to Excel
     diagnostics = compute_diagnostics(estimator)
     
@@ -842,12 +866,12 @@ function save_checkpoint(estimator::SMMAdaptiveMetropolis, prefix::String = "smm
     summary_data = DataFrame(
         Metric = ["Current Iteration", "Accepted Samples", "Current Households", 
                   "Acceptance Rate", "Is Second Stage", "Best SMM Value",
-                  "Average Computation Time", "Random Seed"],
+                  "Average Computation Time", "Random Seed", "Uncertainty Interpretation"],
         Value = [estimator.current_iteration, estimator.n_accepted, estimator.num_current_households,
                  estimator.n_accepted / max(1, estimator.current_iteration), estimator.is_second_stage,
                  isempty(estimator.smm_values) ? NaN : minimum(estimator.smm_values),
                  isempty(estimator.computation_times) ? NaN : mean(estimator.computation_times[max(1, end-99):end]),
-                 estimator.random_seed]
+                 estimator.random_seed, "Uncalibrated loss-based chain; not SMM standard errors"]
     )
     
     # Parameter estimates
@@ -856,7 +880,7 @@ function save_checkpoint(estimator::SMMAdaptiveMetropolis, prefix::String = "smm
         param_data = DataFrame()
         param_data.Parameter = String[]
         param_data.Mean = Float64[]
-        param_data.Std = Float64[]
+        param_data.ChainStd = Float64[]
         param_data.Q2_5 = Float64[]
         param_data.Q97_5 = Float64[]
         
@@ -864,7 +888,7 @@ function save_checkpoint(estimator::SMMAdaptiveMetropolis, prefix::String = "smm
             if haskey(estimates, name)
                 push!(param_data.Parameter, name)
                 push!(param_data.Mean, estimates[name]["mean"])
-                push!(param_data.Std, estimates[name]["std"])
+                push!(param_data.ChainStd, estimates[name]["std"])
                 push!(param_data.Q2_5, estimates[name]["quantile_025"])
                 push!(param_data.Q97_5, estimates[name]["quantile_975"])
             end
@@ -873,76 +897,105 @@ function save_checkpoint(estimator::SMMAdaptiveMetropolis, prefix::String = "smm
         param_data = DataFrame()
     end
         
-    # Save to Excel, conditionally including Parameter_Estimates using pairs
+    # Save descriptive chain summaries to Excel
     sheets = ["Summary" => summary_data]
     if size(param_data, 2) > 0
-        push!(sheets, "Parameter_Estimates" => param_data)
+        push!(sheets, "Chain_Summaries" => param_data)
     end
     XLSX.writetable("$(prefix)_summary.xlsx", sheets...; overwrite=true)
             
     println("Checkpoint saved: $(prefix)_data.jls and $(prefix)_summary.xlsx")
 end
 
-function load_checkpoint!(estimator::SMMAdaptiveMetropolis, prefix::String = "smm_checkpoint")
-    """Load previous state to resume estimation."""
-    
-    # Load serialized data
-    try
-        pickle_data = open("$(prefix)_data.jls", "r") do f
-            deserialize(f)
-        end
-            
-        estimator.chain = pickle_data["chain"]
-        estimator.accepted_chain = pickle_data["accepted_chain"]
-        estimator.smm_values = pickle_data["smm_values"]
-        estimator.covariance_matrix = pickle_data["covariance_matrix"]
-        estimator.weighting_matrix = pickle_data["weighting_matrix"]
-        estimator.empirical_moments = pickle_data["empirical_moments"]
-        estimator.parameter_std_history = pickle_data["parameter_std_history"]
-        estimator.computation_times = pickle_data["computation_times"]
-        
-        # Reconstruct other variables
-        estimator.current_iteration = length(estimator.chain)
-        estimator.n_accepted = length(estimator.accepted_chain)
+function checkpoint_context()
+    source_files = [@__FILE__, joinpath(@__DIR__, "Del_Boca_Prelim.jl"),
+                    joinpath(@__DIR__, "Julia_DelBoca_SMM.jl"),
+                    joinpath(@__DIR__, "Rev3_Data.jl"),
+                    joinpath(@__DIR__, "Rev3_Tau_Workaround_Data.jl"),
+                    joinpath(@__DIR__, "..", "..", "dsge-simulations", "new_CES_solver.jl"),
+                    joinpath(@__DIR__, "..", "Manifest.toml")]
+    export_files = vcat([REV3_BRIDGE_FILENAME, MIXTURE_PROBABILITIES_FILENAME, MIXTURE_MEANS_FILENAME],
+                        MIXTURE_COVARIANCE_FILENAMES)
+    export_hashes = Dict(file => (isfile(joinpath(attanasio_output_dir(), file)) ?
+                         bytes2hex(sha256(read(joinpath(attanasio_output_dir(), file)))) : nothing)
+                         for file in export_files)
+    return Dict("julia_version" => string(VERSION),
+                "technology" => Dict(string(f) => copy(getfield(true_technology(), f))
+                                    for f in fieldnames(TrueCESTechnology)),
+                "policy_mode" => parent_policy_mode(),
+                "source_hashes" => [bytes2hex(sha256(read(f))) for f in source_files],
+                "household_seed" => synthetic_household_seed(),
+                "export_hashes" => export_hashes,
+                "export_dir" => abspath(attanasio_output_dir()))
+end
 
-        # Verify loaded covariance matrix is positive definite
-        if estimator.covariance_matrix !== nothing && !is_positive_definite(estimator.covariance_matrix)
-            println("Warning: Loaded covariance matrix is not positive definite, reinitializing")
-            d = length(estimator.parameter_names)
-            scaling_parameter = (2.38^2) / d
-            initial_variances = Float64[]
-            for (i, param_name) in enumerate(estimator.parameter_names)
-                if haskey(estimator.custom_proposal_dists, param_name) && haskey(estimator.custom_proposal_dists[param_name], "scale")
-                    variance = estimator.custom_proposal_dists[param_name]["scale"]^2
-                else
-                    lower, upper = estimator.parameter_bounds[i]
-                    variance = ((upper - lower) * 0.01)^2
-                end
-                push!(initial_variances, variance)
-            end
-            estimator.covariance_matrix = scaling_parameter * Diagonal(initial_variances)
-        end
-        
-        println("Checkpoint loaded: $(prefix)_data.jls")
-        println("Resumed at iteration $(estimator.current_iteration) with $(estimator.n_accepted) accepted samples")
-        
-    catch e
-        if isa(e, SystemError)
-            println("Checkpoint file $(prefix)_data.jls not found")
-        else
-            rethrow(e)
-        end
+function save_checkpoint_data(estimator::SMMAdaptiveMetropolis, path::String)
+    data = Dict{String, Any}(string(f) => deepcopy(getfield(estimator, f))
+                             for f in fieldnames(SMMAdaptiveMetropolis))
+    data["checkpoint_version"] = 2
+    data["context"] = checkpoint_context()
+    temp_path, io = mktemp(dirname(abspath(path)))
+    try
+        serialize(io, data)
+        close(io)
+        mv(temp_path, path; force=true)
+    finally
+        isopen(io) && close(io)
+        isfile(temp_path) && rm(temp_path)
     end
+    return path
+end
+
+function load_checkpoint!(estimator::SMMAdaptiveMetropolis, prefix::String="smm_checkpoint")
+    path = "$(prefix)_data.jls"
+    data = open(deserialize, path)
+    get(data, "checkpoint_version", 0) == 2 || error(
+        "Legacy checkpoint lacks the RNG and simulation state; start a fresh run.")
+    all(haskey(data, string(f)) for f in fieldnames(SMMAdaptiveMetropolis)) ||
+        error("Incomplete estimator checkpoint.")
+    data["context"] == checkpoint_context() || error(
+        "Checkpoint technology, simulation settings, or code changed; start a fresh run.")
+    data["parameter_names"] == estimator.parameter_names || error("Checkpoint parameter names differ.")
+    data["parameter_bounds"] == estimator.parameter_bounds || error("Checkpoint parameter bounds differ.")
+    data["empirical_moments"] == estimator.empirical_moments || error("Checkpoint target moments differ.")
+    n = data["current_iteration"]
+    nch = length(data["chain"])
+    nch == (n == 0 && nch == 0 ? 0 : n + 1) || error("Invalid chain/iteration count.")
+    length(data["smm_values"]) == nch || error("Invalid checkpoint loss history.")
+    length(data["acceptance_history"]) == n || error("Invalid checkpoint acceptance history.")
+    data["n_accepted"] == count(data["acceptance_history"]) || error("Invalid acceptance count.")
+    length(data["accepted_chain"]) == (nch == 0 ? 0 : data["n_accepted"] + 1) ||
+        error("Invalid accepted-move history.")
+    length(data["household_count_history"]) == n || error("Invalid household history.")
+    length(data["computation_times"]) == n || error("Invalid timing history.")
+    size(data["simulated_households"]) == (data["num_current_households"], NUM_PERIODS, 7) ||
+        error("Invalid checkpoint household dimensions.")
+    length(data["empirical_moments"]) == NUM_MOMENTS || error("Invalid target dimensions.")
+    size(data["weighting_matrix"]) == (NUM_MOMENTS, NUM_MOMENTS) || error("Invalid weights.")
+    # Build and validate a temporary object so a bad checkpoint cannot partially
+    # overwrite the caller. No objective reevaluation is needed: sample, shocks,
+    # technology and the objective implementation are restored/verified together.
+    restored = SMMAdaptiveMetropolis((data[string(f)] for f in fieldnames(SMMAdaptiveMetropolis))...)
+    for state in restored.chain
+        check_parameter_constraints(restored, state) || error("Invalid checkpoint parameter state.")
+    end
+    restored.covariance_matrix === nothing || is_positive_definite(restored.covariance_matrix) ||
+        error("Invalid checkpoint proposal covariance.")
+    for f in fieldnames(SMMAdaptiveMetropolis)
+        setfield!(estimator, f, getfield(restored, f))
+    end
+    println("Checkpoint loaded at iteration $n with $(estimator.n_accepted) accepted moves.")
+    return estimator
 end
 
 function plot_diagnostics(estimator::SMMAdaptiveMetropolis; save_path::Union{String, Nothing} = nothing)
     """Plot chain diagnostics."""
-    if length(estimator.accepted_chain) < 10
+    if length(estimator.chain) < 10
         println("Not enough samples for plotting")
         return
     end
         
-    chain_array = hcat(estimator.accepted_chain...)'
+    chain_array = hcat(estimator.chain...)'
     n_params = length(estimator.parameter_names)
     
     plots_array = []
@@ -954,7 +1007,7 @@ function plot_diagnostics(estimator::SMMAdaptiveMetropolis; save_path::Union{Str
         
         # Histogram
         p2 = histogram(chain_array[:, i], bins=50, alpha=0.7, 
-                      title="$name - Posterior Distribution",
+                      title="$name - Loss-based chain (uncalibrated)",
                       xlabel="Value", ylabel="Frequency")
         
         push!(plots_array, p1, p2)
@@ -991,7 +1044,7 @@ end
 # WEIGHTING MATRIX DIAGNOSTICS FUNCTIONS
 # =============================================================================
 
-function compute_optimal_weighting_matrix_robust(accepted_chain::Vector{Vector{Float64}}, 
+function compute_optimal_weighting_matrix_robust(chain::Vector{Vector{Float64}},
                                                 simulate_moments_func::Function,
                                                 num_moments::Int = NUM_MOMENTS;
                                                 min_samples_multiplier::Int = 2,
@@ -1002,8 +1055,8 @@ function compute_optimal_weighting_matrix_robust(accepted_chain::Vector{Vector{F
     
     Parameters:
     -----------
-    accepted_chain : Vector{Vector{Float64}}
-        List of accepted parameter vectors from Stage 1
+    chain : Vector{Vector{Float64}}
+        List of iteration parameter vectors from Stage 1
     simulate_moments_func : Callable
         Function that takes parameters and returns simulated moments
     num_moments : int
@@ -1022,17 +1075,17 @@ function compute_optimal_weighting_matrix_robust(accepted_chain::Vector{Vector{F
     
     min_samples = max(100, min_samples_multiplier * num_moments)
     
-    if length(accepted_chain) < min_samples
-        println("Warning: Need at least $min_samples samples, have $(length(accepted_chain))")
+    if length(chain) < min_samples
+        println("Warning: Need at least $min_samples samples, have $(length(chain))")
         println("Using identity weighting matrix")
         return Matrix{Float64}(I, num_moments, num_moments), Dict{String, Any}(), false
     end
         
     println("Computing moment variance-covariance matrix...")
     
-    # Use recent accepted parameters
-    n_params_to_use = min(max_param_vectors, length(accepted_chain))
-    recent_params = accepted_chain[end-n_params_to_use+1:end]
+    # Use recent iteration parameters
+    n_params_to_use = min(max_param_vectors, length(chain))
+    recent_params = chain[end-n_params_to_use+1:end]
     
     # Subsample to target number
     subsample_rate = max(1, length(recent_params) ÷ subsample_target)
@@ -1151,7 +1204,7 @@ function enforce_positive_semidefinite(moment_cov::Matrix{Float64},
         "original_eigenvalues" => eigenvals,
         "regularized_eigenvalues" => regularized_eigenvals,
         "final_eigenvalues" => final_eigenvals,
-        "condition_number_original" => any(eigenvals .!= 0) ? maximum(eigenvals) / maximum(abs.(eigenvals[eigenvals .!= 0])) : Inf,
+        "condition_number_original" => minimum(abs.(eigenvals)) > 0 ? maximum(abs.(eigenvals)) / minimum(abs.(eigenvals)) : Inf,
         "condition_number_final" => condition_number,
         "negative_eigenvalues" => negative_eigs,
         "near_zero_eigenvalues" => near_zero_eigs,
@@ -1219,14 +1272,60 @@ function validate_custom_proposals(custom_proposal_dists::Dict{String, Dict{Stri
             if !all(key in keys(dist_spec) for key in ["scale", "range"])
                 throw(ArgumentError("Truncated normal proposal for $param_name requires 'scale', 'range'"))
             end
+        elseif dist_type == "uniform"
+            haskey(dist_spec, "range") || throw(ArgumentError("Uniform proposal requires range."))
         elseif dist_type == "custom_function"
-            if !("sampler" in keys(dist_spec))
-                throw(ArgumentError("Custom function proposal for $param_name requires 'sampler' function"))
+            if !all(haskey(dist_spec, k) for k in ("sampler", "logpdf"))
+                throw(ArgumentError("Custom proposal requires sampler(rng, current) and logpdf(to, from)."))
             end
         else 
             throw(ArgumentError("Unknown proposal distribution type: $dist_type"))
         end
+        # Constructing each distribution validates its numeric parameters.
+        dist_type == "custom_function" || custom_proposal_distribution(dist_spec, 1.0)
     end
+end
+
+function custom_proposal_distribution(spec, current::Float64)
+    kind = spec["type"]
+    kind == "normal" && return Normal(current, spec["std"])
+    kind == "lognormal" && return LogNormal(log(current), spec["sigma"])
+    if kind == "beta"
+        spec["scale"] > 0 || error("Beta scale must be positive.")
+        return LocationScale(spec["loc"], spec["scale"], Beta(spec["alpha"], spec["beta"]))
+    end
+    if kind == "truncated_normal"
+        lo, hi = spec["range"]
+        lo < hi || error("Invalid truncated-normal range.")
+        return truncated(Normal(current, spec["scale"]), lo, hi)
+    end
+    if kind == "uniform"
+        lo, hi = spec["range"]
+        lo < hi || error("Invalid uniform range.")
+        return Uniform(lo, hi)
+    end
+    error("Unknown proposal distribution: $kind")
+end
+
+function custom_proposal_logpdf(spec, to::Float64, from::Float64)
+    if spec["type"] == "custom_function"
+        return spec["logpdf"](to, from; get(spec, "kwargs", Dict())...)
+    end
+    spec["type"] == "lognormal" && from <= 0 && return -Inf
+    return logpdf(custom_proposal_distribution(spec, from), to)
+end
+
+function proposal_log_ratio(estimator::SMMAdaptiveMetropolis, current, proposal)
+    # Gaussian coordinates (including the marginal Gaussian block left after
+    # custom overrides) are symmetric at the frozen iteration covariance.
+    ratio = 0.0
+    for (i, name) in enumerate(estimator.parameter_names)
+        haskey(estimator.custom_proposal_dists, name) || continue
+        spec = estimator.custom_proposal_dists[name]
+        ratio += custom_proposal_logpdf(spec, current[i], proposal[i]) -
+                 custom_proposal_logpdf(spec, proposal[i], current[i])
+    end
+    return ratio
 end
 
 function propose_single_parameter(param_idx::Int, 
@@ -1273,7 +1372,7 @@ function propose_single_parameter(param_idx::Int,
         elseif dist_type == "lognormal"
             sigma = dist_spec["sigma"]
             # Sample in log space, then transform
-            log_current = log(max(current_value, 1e-10))  # Avoid log(0)
+            log_current = log(current_value)
             log_proposal = log_current + sigma * randn(rng)
             proposal = exp(log_proposal)
             
@@ -1298,7 +1397,7 @@ function propose_single_parameter(param_idx::Int,
         elseif dist_type == "custom_function"
             sampler = dist_spec["sampler"]
             kwargs = get(dist_spec, "kwargs", Dict())
-            proposal = sampler(current_value; kwargs...)
+            proposal = sampler(rng, current_value; kwargs...)
     
         else
             # Fallback to normal
@@ -1445,7 +1544,7 @@ function main()
     
     # Get final estimates
     final_estimates = get_parameter_estimates(estimator)
-    println("\nFinal Parameter Estimates:")
+    println("\nFinal loss-based chain summaries (uncalibrated):")
     println("="^50)
     for name in estimator.parameter_names
         if haskey(final_estimates, name)

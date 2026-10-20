@@ -70,8 +70,8 @@ function compute_weighting_matrix(
                        decomposition.vectors'
     weighting_matrix = Matrix(Symmetric(weighting_matrix))
 
-    # Normalizing the trace keeps the magnitude of the pseudo-likelihood stable
-    # when adaptive Metropolis switches from identity to optimal SMM weights.
+    # Trace normalization is an optimization convention. The associated
+    # exp(-loss/2) chain is not calibrated for inferential uncertainty.
     return weighting_matrix .* (size(weighting_matrix, 1) / tr(weighting_matrix))
 end
 

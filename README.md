@@ -17,3 +17,18 @@ In `parameter-estimation/Del_Boca_Replication/`, `Rev3_Tau_Workaround_Substantiv
 `parameter-estimation/Attanasio Replication/VDE DelBoca Export/` holds the real-data production bridge, mixture probabilities, component means, and two covariance matrices used by Del Boca. These are separate from the bundled fake data; fake-data estimates should not be mixed with these exports.
 
 `parameter-estimation/prelim results/Del_Boca_Prelim_results_20260915_095148/` holds the parameter estimates, target moments, saved chain, Excel summary, and run notes. The run notes explain the preliminary results and their limitations. These saved results have not been changed.
+
+## Validation and estimation settings
+
+Use Julia 1.12.5, matching `parameter-estimation/Manifest.toml`. Run the regression checks from the repository root:
+
+```sh
+julia --project=parameter-estimation --threads=2 parameter-estimation/tests/runtests.jl
+Rscript parameter-estimation/tests/test_exports.R
+```
+
+The R checks need `digest` and `minpack.lm`; the full R pipeline also needs the packages loaded by `Master File.r`. The R-to-Julia handoff now writes five aggregate CSVs plus `rev3_export_manifest.csv`. Point Julia's `IEHC_ATTANASIO_OUTPUT_DIR` at that export directory. New bundles carry checksums and run provenance; historical VDE bundles remain readable without a manifest. `IEHC_RUN_BOOTSTRAP=0` skips both factor and production bootstraps and writes point-estimate tables.
+
+Simulation uses fixed household/period production shocks. `IEHC_PARENT_POLICY_MODE=shared` (default) uses policies at mean wage/public-input trajectories. `IEHC_PARENT_POLICY_MODE=household` solves at each household's own trajectories and is substantially slower. `benchmark_parent_policies(households, parameters)` measures the difference for a small representative batch using common grids and shocks. Technology fits at bounds now emit diagnostics; their bounds are unchanged.
+
+SMM point estimates are the DX-NES minimizers. Metropolis summaries describe an uncalibrated loss-based chain and are not SMM standard errors or validated posterior intervals. New checkpoints resume complete estimator state; older checkpoints cannot be resumed safely. Full-sample estimation and uncertainty calibration remain separate research runs.

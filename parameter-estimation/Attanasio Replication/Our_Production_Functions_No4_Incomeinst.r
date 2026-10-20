@@ -19,56 +19,30 @@ nested_ces_log <- function(h0, e, tau, z, theta_h, theta_p, ces_delta, mu, rho) 
   return((1 / rho_safe) * log(total_input))
 }
 
-export_rev3_bridge <- function(output_dir, period_estimates) {
-  extract_period <- function(period, estimate_matrix) {
-    if (is.null(dim(estimate_matrix)) || ncol(estimate_matrix) < 2) {
-      stop(paste("Period", period, "does not contain control-function estimates."))
-    }
-    estimate <- estimate_matrix[, 2]
-    names(estimate) <- rownames(estimate_matrix)
-    required <- c(
-      "delta", "control function", "peducation", "theta_h", "theta_p",
-      "ces_delta", "mu", "rho", "residual sd"
-    )
-    if (!all(required %in% names(estimate))) {
-      stop(paste("Period", period, "is missing required nested-CES estimates."))
-    }
-    values <- estimate[required]
-    if (any(!is.finite(values))) {
-      stop(paste("Period", period, "contains nonfinite nested-CES estimates."))
-    }
-    if (values[["theta_h"]] <= 0 || values[["theta_h"]] >= 1 ||
-        values[["theta_p"]] <= 0 || values[["theta_p"]] >= 1 ||
-        values[["ces_delta"]] <= 0 || values[["ces_delta"]] >= 1 ||
-        values[["mu"]] < -5 || values[["mu"]] > 1 ||
-        values[["rho"]] < -5 || values[["rho"]] > 1 ||
-        values[["residual sd"]] <= 0) {
-      stop(paste("Period", period, "contains an out-of-domain nested-CES estimate."))
-    }
-    data.frame(
-      period = period,
-      intercept = unname(values[["delta"]]),
-      parent_education_coefficient = unname(values[["peducation"]]),
-      theta_h = unname(values[["theta_h"]]),
-      theta_p = unname(values[["theta_p"]]),
-      ces_delta = unname(values[["ces_delta"]]),
-      mu = unname(values[["mu"]]),
-      rho = unname(values[["rho"]]),
-      control_function_coefficient = unname(values[["control function"]]),
-      residual_sd = unname(values[["residual sd"]])
-    )
-  }
+source(file.path(dir, "Our_Export_Rev3.R"))
 
-  bridge <- do.call(
-    rbind,
-    lapply(seq_along(period_estimates), function(period) {
-      extract_period(period, period_estimates[[period]])
-    })
-  )
-  bridge_file <- file.path(output_dir, "attanasio_rev3_bridge.csv")
-  write.csv(bridge, bridge_file, row.names = FALSE)
-  message("Wrote Rev3 technology bridge: ", bridge_file)
-  invisible(bridge)
+# A boundary estimate is not itself a coding error. Preserve economically
+# admissible bounds, but refuse nonconvergence and report local identification.
+production_fit_diagnostics <- list()
+check_production_fit <- function(fit, period, control_function) {
+  if (inherits(fit, "try-error") || !inherits(fit, "nls")) stop("Production fit failed in period ", period)
+  info <- fit$convInfo
+  if (!isTRUE(info$isConv)) stop("Production fit did not converge in period ", period, ": ", info$stopMessage)
+  coefficients <- coef(fit)
+  lo <- c(theta_h = .01, theta_p = .01, ces_delta = .01, mu = -5, rho = -5)
+  hi <- c(theta_h = .99, theta_p = .99, ces_delta = .99, mu = .99, rho = .99)
+  at_bound <- names(lo)[abs(coefficients[names(lo)] - lo) < 1e-5 |
+                        abs(coefficients[names(hi)] - hi) < 1e-5]
+  singular_values <- svd(fit$m$gradient(), nu = 0, nv = 0)$d
+  condition <- if (min(singular_values) <= max(singular_values) * .Machine$double.eps) Inf else max(singular_values) / min(singular_values)
+  row <- data.frame(period = period, control_function = control_function,
+                    converged = info$isConv, iterations = info$finIter,
+                    stop_message = info$stopMessage, residual_ss = deviance(fit),
+                    jacobian_condition = condition, boundary_parameters = paste(at_bound, collapse = ";"))
+  production_fit_diagnostics[[length(production_fit_diagnostics) + 1L]] <<- row
+  if (length(at_bound)) warning("Period ", period, " production estimates at bounds: ", paste(at_bound, collapse = ", "),
+                                 ". Check identification and sensitivity before structural interpretation.")
+  invisible(fit)
 }
 
 CES3_nocf <- function(alldata) {
@@ -87,6 +61,7 @@ CES3_nocf <- function(alldata) {
                       lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
                       upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000, ftol=1e-8, ptol=1e-8, gtol=1e-8)), silent=FALSE)
+  check_production_fit(cesout, 3L, FALSE)
   if (length(summary(cesout)) == 11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -130,6 +105,7 @@ CES3_cf <- function(alldata){
                       lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
                       upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
+  check_production_fit(cesout, 3L, TRUE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -163,6 +139,7 @@ CES2_nocf <- function(alldata){
                       lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
                       upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
+  check_production_fit(cesout, 2L, FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -204,6 +181,7 @@ CES2_cf <- function(alldata){
                       lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
                       upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
+  check_production_fit(cesout, 2L, TRUE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -237,6 +215,7 @@ CES1_nocf <- function(alldata){
                       lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
                       upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
+  check_production_fit(cesout, 1L, FALSE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -278,6 +257,7 @@ CES1_cf <- function(alldata){
                       lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
                       upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
                       control=nls.lm.control(maxiter=1000)), silent=FALSE)
+  check_production_fit(cesout, 1L, TRUE)
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -300,7 +280,7 @@ CES1_cf <- function(alldata){
 }
 
 ##ESTIMATION##
-for (boot in 0:1){
+for (boot in 0:Bootstrap){
   # Estimation on true data
   if (boot==0){
     setwd(dir_output)
@@ -365,9 +345,11 @@ for (boot in 0:1){
     save(coef_ces3, file="coef_ces3.R")
     save(coef_ces2, file="coef_ces2.R")
     save(coef_ces1, file="coef_ces1.R")
-    export_rev3_bridge(
-      dir_output,
-      list(trueCESperiod1, trueCESperiod2, trueCESperiod3)
+    write.csv(do.call(rbind, production_fit_diagnostics),
+              file.path(dir_output, "production_fit_diagnostics.csv"), row.names = FALSE)
+    export_rev3_bundle(
+      dir_output, list(trueCESperiod1, trueCESperiod2, trueCESperiod3),
+      prob.mix, mean.mix, cov.mix, namef, data_file
     )
   }
   # Estimation on bootstrap data
@@ -457,6 +439,7 @@ for (boot in 0:1){
 
 # MAKE TABLES OF RESULTS WITH BOOTSTRAPPED STANDARD ERRORS
 
+if (Bootstrap == 1L) {
 # Estimates of the production functions:
 npar <- 10
 
@@ -575,6 +558,14 @@ write.csv(cestable_1, file="cestable_1.csv")
 write.csv(investtable_3, file="investtable3.csv")
 write.csv(investtable_2, file="investtable2.csv")
 write.csv(investtable_1, file="investtable1.csv")
+
+} else {
+  # Publish point estimates only; never read stale bootstrap artifacts.
+  for (period in 1:3) {
+    write.csv(get(paste0("trueCESperiod", period)), paste0("cestable_", period, ".csv"))
+    write.csv(get(paste0("trueInvest", period)), paste0("investtable", period, ".csv"))
+  }
+}
 
 # Save summary of first regression
 inst3_summary <- out3[[4]]

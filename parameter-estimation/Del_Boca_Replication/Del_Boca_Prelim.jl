@@ -1,6 +1,6 @@
 # Preliminary Del Boca implementation with the tau feasibility workaround.
-# The solver and estimator are unchanged; only synthetic household construction
-# conditions the exported mixture draws on feasible time shares.
+# Synthetic household construction conditions the exported mixture draws on
+# feasible time shares. Realized production shocks use fixed common draws.
 # Parent policies come from new_CES_solver, and DX-NES parallelizes candidate
 # evaluations while each candidate applies its solved policy serially.
 
@@ -152,7 +152,8 @@ function bilinear_policy_interp(policy_values, hc_grid, parent_h_grid, t, hc, pa
     return (1.0 - parent_weight) * low_parent_value + parent_weight * high_parent_value
 end
 
-function solve_parent_policy(parameter_values::Vector{Float64}, households::Array{Float64, 3})
+function solve_parent_policy(parameter_values::Vector{Float64}, households::Array{Float64, 3};
+                             hc_grid=nothing, parent_grid=nothing)
     length(parameter_values) == 5 || error(
         "Expected [Delta, perceived_rho, perceived_theta_h_1, perceived_theta_h_2, perceived_theta_h_3].",
     )
@@ -172,8 +173,8 @@ function solve_parent_policy(parameter_values::Vector{Float64}, households::Arra
     transfers = zeros(NUM_PERIODS)
     tau = fill(PARENT_POLICY_TAX_RATE, NUM_PERIODS)
 
-    hc_grid = child_hc_grid(PARENT_POLICY_INITIAL_CHILD_HC, representative_parent_hc)
-    parent_grid = parent_hc_grid(households)
+    hc_grid = hc_grid === nothing ? child_hc_grid(PARENT_POLICY_INITIAL_CHILD_HC, representative_parent_hc) : hc_grid
+    parent_grid = parent_grid === nothing ? parent_hc_grid(households) : parent_grid
 
     return (
         policy=compute_parent_policy(
@@ -224,7 +225,21 @@ function solve_parent_policy(parameter_values::Vector{Float64}, households::Arra
     )
 end
 
-function solve_household_from_policy(parent_policy, household::Matrix{Float64})::Matrix{Float64}
+function production_shock_draws(n::Int; seed::Int=20261020)
+    # Column-major generation gives the same first n households as n grows.
+    # A local RNG keeps draws independent of proposals and thread scheduling.
+    return permutedims(randn(MersenneTwister(seed), NUM_PERIODS, n))
+end
+
+function parent_policy_mode()
+    mode = Symbol(get(ENV, "IEHC_PARENT_POLICY_MODE", "shared"))
+    mode in (:shared, :household) || error("IEHC_PARENT_POLICY_MODE must be shared or household.")
+    return mode
+end
+
+function solve_household_from_policy(parent_policy, household::Matrix{Float64};
+                                     shock_draws=vec(production_shock_draws(1)))::Matrix{Float64}
+    length(shock_draws) == NUM_PERIODS || error("Expected one production shock per period.")
     policy = parent_policy.policy
     solved = zeros(NUM_PERIODS, 4)
     current_child_hc = PARENT_POLICY_INITIAL_CHILD_HC
@@ -247,8 +262,8 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64}):
         )
         labor = clamp(labor, 0.0, 1.0 - 1e-8)
         resources = (1.0 - PARENT_POLICY_TAX_RATE) * wage * parent_hc * labor
-        investment = min(max(desired_investment, 1e-8), max(resources - 1e-8, 1e-8))
-        consumption = max(resources - investment, 1e-8)
+        investment = clamp(desired_investment, 0.0, max(resources - 1e-8, 0.0))
+        consumption = resources - investment
         technology = parent_policy.true_technology
         true_productivity = exp(
             technology.intercept[t] +
@@ -268,11 +283,9 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64}):
             ces_delta=technology.ces_delta[t],
             mu=technology.mu[t],
         )
-        # The new solver integrates a multiplicative lognormal shock when it
-        # rolls forward the true state. Use that same expected transition here
-        # so simulated household paths match the state law used to solve policy.
-        next_child_hc =
-            deterministic_child_hc * exp(0.5 * technology.residual_sd[t]^2)
+        # Decisions integrate uncertainty by quadrature; realized paths draw
+        # that uncertainty. Later choices condition on the realized child HC.
+        next_child_hc = deterministic_child_hc * exp(technology.residual_sd[t] * shock_draws[t])
 
         # Stable household contract: consumption, monetary investment,
         # leisure, and realized child human capital occupy columns 4 through 7.
@@ -300,7 +313,9 @@ function solve_one(args)::Array{Float64, 2}
     return solved
 end
 
-function solve_households(households::Array{Float64, 3}, parameters::Vector{Float64}, num_workers::Int=0)::Array{Float64, 3}
+function solve_households(households::Array{Float64, 3}, parameters::Vector{Float64}, num_workers::Int=0;
+                          policy_mode::Symbol=parent_policy_mode(),
+                          shock_draws=production_shock_draws(size(households, 1)))::Array{Float64, 3}
     """
     Solves households in parallel using a single reusable parent policy.
 
@@ -318,15 +333,25 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
     Array{Float64, 3}
         The updated households array with the solution results assigned to the appropriate columns.
     """
+    policy_mode in (:shared, :household) || error("Unknown parent policy mode: $policy_mode")
+    size(shock_draws) == (size(households, 1), NUM_PERIODS) || error("Invalid production shock dimensions.")
+    all(isfinite, shock_draws) || error("Production shocks must be finite.")
     worker_count = num_workers <= 0 ? Threads.nthreads() : min(num_workers, Threads.nthreads())
     parent_policy = solve_parent_policy(parameters, households)
     results = Vector{Array{Float64, 2}}(undef, size(households, 1))
+    function solve_index(i)
+        policy = policy_mode == :shared ? parent_policy : solve_parent_policy(
+            parameters, households[i:i, :, :];
+            hc_grid=parent_policy.policy.hc_grid, parent_grid=parent_policy.policy.parent_h_grid,
+        )
+        return solve_household_from_policy(policy, households[i, :, :]; shock_draws=shock_draws[i, :])
+    end
 
     # A value of one is used when an outer optimizer already evaluates
     # candidates in parallel; this avoids nested-thread oversubscription.
     if worker_count == 1
         for i in 1:size(households, 1)
-            results[i] = solve_one((parent_policy, households[i, :, :]))
+            results[i] = solve_index(i)
         end
     else
         # Explicit chunks honor num_workers. This also lets callers reserve
@@ -337,7 +362,7 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
             last_household = min(worker * chunk_size, size(households, 1))
             first_household > last_household && continue
             Threads.@spawn for i in first_household:last_household
-                results[i] = solve_one((parent_policy, households[i, :, :]))
+                results[i] = solve_index(i)
             end
         end
     end
@@ -346,6 +371,18 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
         households[i, :, 4:end] = results[i]
     end
     return households
+end
+
+"""Compare the shared policy to policies solved at each household's wages and
+public-input trajectory, on identical state grids and production shock draws.
+Use a small representative batch: household-specific DP is expensive.
+"""
+function benchmark_parent_policies(households::Array{Float64, 3}, parameters::Vector{Float64})
+    shared = solve_households(copy(households), parameters, 1; policy_mode=:shared)
+    individual = solve_households(copy(households), parameters, 1; policy_mode=:household)
+    return (shared_moments=moments(shared), household_moments=moments(individual),
+            moment_difference=moments(shared) - moments(individual),
+            max_choice_difference=maximum(abs.(shared[:, :, 4:6] - individual[:, :, 4:6])))
 end
 
 function moments(households::Array{Float64, 3})::Vector{Float64}
