@@ -8,8 +8,9 @@
 # - Parents enter each period observing the true child human capital state.
 # - Parent choices are solved on a 2D state grid: child human capital and parent
 #   human capital.
-# - The continuation state is rolled forward using the true production function
-#   and a multiplicative lognormal shock integrated by Gauss-Hermite quadrature.
+# - Expected continuation uses perceived production and a multiplicative
+#   lognormal shock integrated by Gauss-Hermite quadrature. Realized outcomes
+#   use true production.
 # - The perceived production function is also evaluated and returned so the
 #   wedge between perceived and true child human capital can be inspected.
 #
@@ -51,7 +52,9 @@ for both perceived and true technologies; the caller passes the relevant
 parameter vector.
 
 Equation 41 uses monetary investment e, parental time investment tau, and public
-input z. Parental time investment is the parent's non-labor time, 1 - labor.
+input z. The caller supplies educational involvement in the production input's
+units. compute_parent_policy maps nonlabor time to this input using an explicit
+involvement_scale; utility still uses physical nonlabor time.
 The nested-CES parameters are explicit keywords so Rev3 can use the
 period-specific Attanasio estimates. The theta_e and theta_g positional
 arguments remain for compatibility with earlier callers.
@@ -243,11 +246,9 @@ end
 Solve parent policy on a 2D state grid over current child human capital and
 parent human capital.
 
-The policy objective rolls the next-period state forward using the true
-production function and multiplicative lognormal shocks. This matches the story
-that parents observe the child's realized human capital before making the next
-period's decision. The perceived production function is still evaluated and
-returned so the implied perceived/true wedge can be inspected.
+The policy objective uses perceived production and multiplicative lognormal
+shocks. True production determines the child's realized next-period state.
+The returned policies report both production paths.
 
 Returned arrays have shape:
 
@@ -290,7 +291,13 @@ function compute_parent_policy(
     periods::Int = 3,
     quadrature_n::Int = 7,
     tolerance::Float64 = 1e-8,
+    wage_per_efficiency_unit::Bool = true,
+    involvement_scale::Float64 = 1.0,
 )
+    # A single common conversion across ages, not a separately chosen time share.
+    # One preserves legacy callers; it is not an empirically identified scale.
+    isfinite(involvement_scale) && involvement_scale > 0.0 ||
+        error("involvement_scale must be finite and positive.")
     hc_grid = Float64.(collect(hc_grid))
     parent_h_grid = Float64.(collect(parent_h_grid))
     wages = as_period_vector(wages, periods)
@@ -361,7 +368,11 @@ function compute_parent_policy(
                 hc0 = hc_grid[ih]
                 max_l = 1.0 - min_c
 
-                resources(labor) = (1.0 - tau[t]) * wages[t] * parent_h * labor + transfers[t]
+                # Del Boca supplies maternal earnings per unit labor and fixed
+                # family income. Standalone efficiency wages retain their
+                # original interpretation when this flag is true.
+                earnings_scale = wage_per_efficiency_unit ? parent_h : 1.0
+                resources(labor) = (1.0 - tau[t]) * wages[t] * earnings_scale * labor + transfers[t]
                 max_resources = resources(max_l)
                 max_e = max(min_e, max_resources - min_c)
 
@@ -393,7 +404,7 @@ function compute_parent_policy(
                     hc_perceived_det = hc_production(
                         hc0,
                         investment,
-                        1.0 - labor,
+                        involvement_scale * (1.0 - labor),
                         public_inputs[t],
                         perceived_A,
                         perceived_theta_h[t],
@@ -454,11 +465,23 @@ function compute_parent_policy(
                     end
                 end
 
+                # Positive fixed income can finance a zero-work policy. Test
+                # the exact corner rather than relying on a near-zero grid result.
+                if resources(0.0) - min_c > min_e
+                    zero_work_e, zero_work_value = golden_maximize(
+                        e -> objective(0.0, e), min_e, resources(0.0) - min_c;
+                        tolerance=tolerance,
+                    )
+                    if zero_work_value >= best_value
+                        best_l, best_e, best_value = 0.0, zero_work_e, zero_work_value
+                    end
+                end
+
                 best_c = resources(best_l) - best_e
                 perceived_hc_det = hc_production(
                     hc0,
                     best_e,
-                    1.0 - best_l,
+                    involvement_scale * (1.0 - best_l),
                     public_inputs[t],
                     perceived_A,
                     perceived_theta_h[t],
@@ -472,7 +495,7 @@ function compute_parent_policy(
                 true_hc_det = hc_production(
                     hc0,
                     best_e,
-                    1.0 - best_l,
+                    involvement_scale * (1.0 - best_l),
                     public_inputs[t],
                     true_A,
                     true_theta_h[t],

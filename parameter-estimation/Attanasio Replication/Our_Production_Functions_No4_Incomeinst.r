@@ -10,13 +10,24 @@ ensure_tau <- function(alldata, period) {
   return(alldata)
 }
 
+ces_log_pair <- function(log_x, log_y, weight, exponent) {
+  if (exponent == 0) return(weight * log_x + (1 - weight) * log_y)
+  gap <- exponent * (log_x - log_y)
+  # Factor out y for small gaps so the numerator retains precision near zero.
+  near <- abs(gap) <= 0.5
+  log_sum <- numeric(length(gap))
+  log_sum[near] <- log1p(weight * expm1(gap[near]))
+  a <- log(weight) + gap[!near]
+  b <- log1p(-weight)
+  top <- pmax(a, b)
+  log_sum[!near] <- top + log1p(exp(-abs(a - b)))
+  log_y + log_sum / exponent
+}
+
 nested_ces_log <- function(h0, e, tau, z, theta_h, theta_p, ces_delta, mu, rho) {
-  mu_safe <- ifelse(abs(mu) < 1e-8, 1e-8, mu)
-  rho_safe <- ifelse(abs(rho) < 1e-8, 1e-8, rho)
-  private_input <- (e^ces_delta) * (tau^(1 - ces_delta))
-  private_public <- theta_p * private_input^mu_safe + (1 - theta_p) * z^mu_safe
-  total_input <- theta_h * h0^rho_safe + (1 - theta_h) * private_public^(rho_safe / mu_safe)
-  return((1 / rho_safe) * log(total_input))
+  private_input <- ces_delta * log(e) + (1 - ces_delta) * log(tau)
+  private_public <- ces_log_pair(private_input, log(z), theta_p, mu)
+  ces_log_pair(log(h0), private_public, theta_h, rho)
 }
 
 source(file.path(dir, "Our_Export_Rev3.R"))
@@ -24,44 +35,173 @@ source(file.path(dir, "Our_Export_Rev3.R"))
 # A boundary estimate is not itself a coding error. Preserve economically
 # admissible bounds, but refuse nonconvergence and report local identification.
 production_fit_diagnostics <- list()
+production_start_diagnostics <- list()
+production_profile_diagnostics <- list()
+production_bounds_diagnostics <- list()
+ces_lower <- c(theta_h=.01, theta_p=.01, ces_delta=.01, mu=-5, rho=-5)
+ces_upper <- c(theta_h=.99, theta_p=.99, ces_delta=.99, mu=.99, rho=.99)
+
+ces_boundary_parameters <- function(coefficients) {
+  p <- intersect(names(ces_lower), names(coefficients))
+  side <- ifelse(abs(coefficients[p] - ces_lower[p]) < 1e-5, "lower",
+           ifelse(abs(coefficients[p] - ces_upper[p]) < 1e-5, "upper", ""))
+  setNames(side[side != ""], p[side != ""])
+}
+
 check_production_fit <- function(fit, period, control_function) {
   if (inherits(fit, "try-error") || !inherits(fit, "nls")) stop("Production fit failed in period ", period)
   info <- fit$convInfo
   if (!isTRUE(info$isConv)) stop("Production fit did not converge in period ", period, ": ", info$stopMessage)
   coefficients <- coef(fit)
-  lo <- c(theta_h = .01, theta_p = .01, ces_delta = .01, mu = -5, rho = -5)
-  hi <- c(theta_h = .99, theta_p = .99, ces_delta = .99, mu = .99, rho = .99)
-  at_bound <- names(lo)[abs(coefficients[names(lo)] - lo) < 1e-5 |
-                        abs(coefficients[names(hi)] - hi) < 1e-5]
-  singular_values <- svd(fit$m$gradient(), nu = 0, nv = 0)$d
-  condition <- if (min(singular_values) <= max(singular_values) * .Machine$double.eps) Inf else max(singular_values) / min(singular_values)
+  at_bound <- ces_boundary_parameters(coefficients)
+  gradient <- fit$m$gradient()
+  # Scale the columns so units alone do not imply weak local identification.
+  column_norms <- sqrt(colSums(gradient^2))
+  zero_columns <- any(column_norms == 0)
+  singular_values <- svd(sweep(gradient, 2, ifelse(column_norms == 0, 1, column_norms), "/"),
+                         nu = 0, nv = 0)$d
+  raw_singular_values <- svd(gradient, nu = 0, nv = 0)$d
+  raw_condition <- if (min(raw_singular_values) == 0) Inf else max(raw_singular_values) / min(raw_singular_values)
+  condition <- if (zero_columns || min(singular_values) <= max(singular_values) * .Machine$double.eps) Inf else max(singular_values) / min(singular_values)
   row <- data.frame(period = period, control_function = control_function,
                     converged = info$isConv, iterations = info$finIter,
                     stop_message = info$stopMessage, residual_ss = deviance(fit),
-                    jacobian_condition = condition, boundary_parameters = paste(at_bound, collapse = ";"))
+                    jacobian_condition = raw_condition, scaled_jacobian_condition = condition,
+                    boundary_parameters = paste(names(at_bound), collapse = ";"),
+                    boundary_sides = paste(at_bound, collapse = ";"))
   production_fit_diagnostics[[length(production_fit_diagnostics) + 1L]] <<- row
-  if (length(at_bound)) warning("Period ", period, " production estimates at bounds: ", paste(at_bound, collapse = ", "),
+  if (length(at_bound)) warning("Period ", period, " production estimates at bounds: ",
+                                 paste(paste0(names(at_bound), " (", at_bound, ")"), collapse = ", "),
                                  ". Check identification and sensitivity before structural interpretation.")
   invisible(fit)
 }
 
-CES3_nocf <- function(alldata) {
+production_starts <- function(control_function) {
+  linear <- c(delta=.3, if (control_function) c(alpha=0), alpha3=.05)
+  list(
+    historical=c(linear, theta_h=.3, theta_p=.5, ces_delta=.5, mu=-.5, rho=-.5),
+    complementary=c(linear, theta_h=.65, theta_p=.3, ces_delta=.65, mu=-2, rho=-2),
+    substitutable=c(linear, theta_h=.65, theta_p=.7, ces_delta=.35, mu=.65, rho=.65),
+    mixed=c(linear, theta_h=.2, theta_p=.55, ces_delta=.6, mu=.4, rho=-1.25)
+  )
+}
+
+try_production_fit <- function(formula, data, start, lower=ces_lower, upper=ces_upper,
+                               fixed=numeric()) {
+  if (length(fixed)) {
+    formula[[3L]] <- do.call("substitute", list(formula[[3L]], as.list(fixed)))
+    start <- start[!names(start) %in% names(fixed)]
+  }
+  bound_vector <- function(bounds, default) {
+    result <- setNames(rep(default, length(start)), names(start))
+    parameters <- intersect(names(start), names(bounds))
+    result[parameters] <- bounds[parameters]
+    result
+  }
+  lower <- bound_vector(lower, -Inf)
+  upper <- bound_vector(upper, Inf)
+  fit <- tryCatch(suppressWarnings(minpack.lm::nlsLM(formula, data=data, start=start,
+    lower=lower, upper=upper, control=minpack.lm::nls.lm.control(
+      maxiter=1024, maxfev=12000, ftol=1e-10, ptol=1e-10, gtol=1e-10))), error=identity)
+  if (inherits(fit, "error")) return(list(fit=NULL, rss=NA_real_, message=conditionMessage(fit)))
+  rss <- deviance(fit)
+  usable <- isTRUE(fit$convInfo$isConv) && is.finite(rss) && all(is.finite(coef(fit)))
+  list(fit=if (usable) fit, rss=if (usable) rss else NA_real_, message=fit$convInfo$stopMessage)
+}
+
+best_production_attempt <- function(attempts) {
+  rss <- vapply(attempts, function(x) x$rss, 0.0)
+  if (all(is.na(rss))) return(NA_integer_)
+  which.min(rss)
+}
+
+profile_production_fit <- function(formula, data, fit, parameter, grid, fallback_start) {
+  fitted_rss <- deviance(fit)
+  warm <- coef(fit)
+  do.call(rbind, lapply(grid, function(value) {
+    attempts <- lapply(list(warm, fallback_start), function(start) {
+      try_production_fit(formula, data, start, fixed=setNames(value, parameter))
+    })
+    best <- best_production_attempt(attempts)
+    rss <- if (is.na(best)) NA_real_ else attempts[[best]]$rss
+    data.frame(parameter=parameter, fixed_value=value, residual_ss=rss,
+               delta_residual_ss=rss-fitted_rss, converged=!is.na(best))
+  }))
+}
+
+fit_production_ces <- function(formula, data, period, control_function, diagnose=TRUE) {
+  starts <- production_starts(control_function)
+  attempts <- lapply(starts, function(start) try_production_fit(formula, data, start))
+  best <- best_production_attempt(attempts)
+  if (is.na(best)) stop("No CES start converged in period ", period, " (control function=",
+    control_function, "): ", paste(unique(vapply(attempts, function(x) x$message, "")), collapse="; "))
+  fit <- attempts[[best]]$fit
+  check_production_fit(fit, period, control_function)
+  if (!diagnose) return(fit)
+  add_context <- function(row) data.frame(period=period, control_function=control_function, row)
+  production_start_diagnostics[[length(production_start_diagnostics)+1L]] <<- add_context(
+    data.frame(start=names(starts), selected=seq_along(starts)==best,
+               converged=vapply(attempts, function(x) !is.null(x$fit), TRUE),
+               residual_ss=vapply(attempts, function(x) x$rss, 0.0),
+               stop_message=vapply(attempts, function(x) x$message, "")))
+
+  for (parameter in names(ces_boundary_parameters(coef(fit)))) {
+    lo <- ces_lower[[parameter]]
+    hi <- ces_upper[[parameter]]
+    grid <- sort(unique(c(coef(fit)[[parameter]], lo + (hi-lo)*c(0,.02,.1,.25,.5,.75,.9,.98,1))))
+    profile <- profile_production_fit(formula, data, fit, parameter, grid, starts[[1L]])
+    if (any(profile$delta_residual_ss < -1e-8 * max(1, deviance(fit)), na.rm=TRUE)) warning(
+      "Period ", period, " ", parameter, " profile improved on the selected multistart fit. ",
+      "Inspect the objective profile before using the estimate.")
+    production_profile_diagnostics[[length(production_profile_diagnostics)+1L]] <<- add_context(profile)
+
+    # Relax only the active end and only for sensitivity; never export this fit.
+    lower <- ces_lower
+    upper <- ces_upper
+    side <- ces_boundary_parameters(coef(fit))[[parameter]]
+    if (side == "lower") lower[[parameter]] <- if (parameter %in% c("mu", "rho")) -7 else .001
+    if (side == "upper") upper[[parameter]] <- .999
+    alternatives <- lapply(list(coef(fit), starts[[1L]]), function(start)
+      try_production_fit(formula, data, start, lower=lower, upper=upper))
+    choice <- best_production_attempt(alternatives)
+    alt <- if (!is.na(choice)) alternatives[[choice]]
+    production_bounds_diagnostics[[length(production_bounds_diagnostics)+1L]] <<- add_context(
+      data.frame(parameter=parameter, side=side, tested_bound=if (side=="lower") lower[[parameter]] else upper[[parameter]],
+                 estimate=unname(coef(fit)[[parameter]]),
+                 alternative_estimate=if (is.null(alt)) NA_real_ else unname(coef(alt$fit)[[parameter]]),
+                 residual_ss=deviance(fit),
+                 alternative_residual_ss=if (is.null(alt)) NA_real_ else alt$rss,
+                 converged=!is.null(alt)))
+  }
+  fit
+}
+
+write_ces_fit_diagnostics <- function(output_dir) {
+  write_diagnostics <- function(rows, filename, columns=NULL) {
+    # Write headers even when no boundary was hit, replacing old diagnostics.
+    table <- if (length(rows)) do.call(rbind, rows) else
+      as.data.frame(setNames(rep(list(logical(0)), length(columns)), columns))
+    write.csv(table, file.path(output_dir, filename), row.names=FALSE)
+  }
+  context <- c("period", "control_function")
+  write_diagnostics(production_fit_diagnostics, "production_fit_diagnostics.csv")
+  write_diagnostics(production_start_diagnostics, "production_fit_starts.csv",
+                    c(context, "start", "selected", "converged", "residual_ss", "stop_message"))
+  write_diagnostics(production_profile_diagnostics, "production_boundary_profiles.csv",
+                    c(context, "parameter", "fixed_value", "residual_ss", "delta_residual_ss", "converged"))
+  write_diagnostics(production_bounds_diagnostics, "production_bound_sensitivity.csv",
+                    c(context, "parameter", "side", "tested_bound", "estimate", "alternative_estimate",
+                      "residual_ss", "alternative_residual_ss", "converged"))
+}
+
+CES3_nocf <- function(alldata, diagnose=TRUE) {
   alldata <- ensure_tau(alldata, 3)
   out <- log(alldata$hc4)
-  # Debug CES term
-  theta_h <- 0.3; theta_p <- 0.5; ces_delta <- 0.5; mu <- -2; rho <- -2
-  ces_term <- nested_ces_log(alldata$hc3, alldata$pinvest3, alldata$tau3, alldata$govinvest3,
-                             theta_h, theta_p, ces_delta, mu, rho)
-  print("CES term summary at start:")
-  print(summary(ces_term))
-  cesout <- try(nlsLM(out ~ nested_ces_log(hc3, pinvest3, tau3, govinvest3,
-                                           theta_h, theta_p, ces_delta, mu, rho)
-                      + delta + alpha3 * peducation, data = alldata,
-                      start=c(delta=0.3, alpha3=0.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
-                      lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
-                      upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
-                      control=nls.lm.control(maxiter=1000, ftol=1e-8, ptol=1e-8, gtol=1e-8)), silent=FALSE)
-  check_production_fit(cesout, 3L, FALSE)
+  cesout <- fit_production_ces(
+    out ~ nested_ces_log(hc3, pinvest3, tau3, govinvest3, theta_h, theta_p, ces_delta, mu, rho)
+          + delta + alpha3*peducation,
+    alldata, 3L, FALSE, diagnose=diagnose
+  )
   if (length(summary(cesout)) == 11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -78,7 +218,7 @@ CES3_nocf <- function(alldata) {
   return(estim)
 }
 
-CES3_cf <- function(alldata){
+CES3_cf <- function(alldata, diagnose=TRUE) {
   alldata <- ensure_tau(alldata, 3)
   out <- log(alldata$hc4)
   inst3 <- lm(log(pinvest3) ~ log(hc3) + log(peducation) + log(income3), data=alldata)
@@ -98,14 +238,11 @@ CES3_cf <- function(alldata){
                   lower.tail = FALSE),
     row.names = names(summary(inst3)$coefficients[,1])
   )
-  cesout <- try(nlsLM(out ~ nested_ces_log(hc3, pinvest3, tau3, govinvest3,
-                                           theta_h, theta_p, ces_delta, mu, rho)
-                      + delta + alpha*cf + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha=0, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
-                      lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
-                      upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
-                      control=nls.lm.control(maxiter=1000)), silent=FALSE)
-  check_production_fit(cesout, 3L, TRUE)
+  cesout <- fit_production_ces(
+    out ~ nested_ces_log(hc3, pinvest3, tau3, govinvest3, theta_h, theta_p, ces_delta, mu, rho)
+          + delta + alpha*cf + alpha3*peducation,
+    alldata, 3L, TRUE, diagnose=diagnose
+  )
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -129,17 +266,14 @@ CES3_cf <- function(alldata){
 
 # Period 2
 
-CES2_nocf <- function(alldata){
+CES2_nocf <- function(alldata, diagnose=TRUE) {
   alldata <- ensure_tau(alldata, 2)
   out <- log(alldata$hc3)
-  cesout <- try(nlsLM(out ~ nested_ces_log(hc2, pinvest2, tau2, govinvest2,
-                                           theta_h, theta_p, ces_delta, mu, rho)
-                      + delta + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
-                      lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
-                      upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
-                      control=nls.lm.control(maxiter=1000)), silent=FALSE)
-  check_production_fit(cesout, 2L, FALSE)
+  cesout <- fit_production_ces(
+    out ~ nested_ces_log(hc2, pinvest2, tau2, govinvest2, theta_h, theta_p, ces_delta, mu, rho)
+          + delta + alpha3*peducation,
+    alldata, 2L, FALSE, diagnose=diagnose
+  )
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -154,7 +288,7 @@ CES2_nocf <- function(alldata){
   return(estim)
 }
 
-CES2_cf <- function(alldata){
+CES2_cf <- function(alldata, diagnose=TRUE) {
   alldata <- ensure_tau(alldata, 2)
   out <- log(alldata$hc3)
   inst2 <- lm(log(pinvest2) ~ log(hc2) + log(peducation) + log(income2), data=alldata)
@@ -174,14 +308,11 @@ CES2_cf <- function(alldata){
                   lower.tail = FALSE),
     row.names = names(summary(inst2)$coefficients[,1])
   )
-  cesout <- try(nlsLM(out ~ nested_ces_log(hc2, pinvest2, tau2, govinvest2,
-                                           theta_h, theta_p, ces_delta, mu, rho)
-                      + delta + alpha*cf + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha=0, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
-                      lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
-                      upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
-                      control=nls.lm.control(maxiter=1000)), silent=FALSE)
-  check_production_fit(cesout, 2L, TRUE)
+  cesout <- fit_production_ces(
+    out ~ nested_ces_log(hc2, pinvest2, tau2, govinvest2, theta_h, theta_p, ces_delta, mu, rho)
+          + delta + alpha*cf + alpha3*peducation,
+    alldata, 2L, TRUE, diagnose=diagnose
+  )
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -205,17 +336,14 @@ CES2_cf <- function(alldata){
 
 # Period 1
 
-CES1_nocf <- function(alldata){
+CES1_nocf <- function(alldata, diagnose=TRUE) {
   alldata <- ensure_tau(alldata, 1)
   out <- log(alldata$hc2)
-  cesout <- try(nlsLM(out ~ nested_ces_log(hc1, pinvest1, tau1, govinvest1,
-                                           theta_h, theta_p, ces_delta, mu, rho)
-                      + delta + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
-                      lower=c(-Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
-                      upper=c(Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
-                      control=nls.lm.control(maxiter=1000)), silent=FALSE)
-  check_production_fit(cesout, 1L, FALSE)
+  cesout <- fit_production_ces(
+    out ~ nested_ces_log(hc1, pinvest1, tau1, govinvest1, theta_h, theta_p, ces_delta, mu, rho)
+          + delta + alpha3*peducation,
+    alldata, 1L, FALSE, diagnose=diagnose
+  )
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -230,7 +358,7 @@ CES1_nocf <- function(alldata){
   return(estim)
 }
 
-CES1_cf <- function(alldata){
+CES1_cf <- function(alldata, diagnose=TRUE) {
   alldata <- ensure_tau(alldata, 1)
   out <- log(alldata$hc2)
   inst1 <- lm(log(pinvest1) ~ log(peducation) + log(income1), data=alldata)
@@ -250,14 +378,11 @@ CES1_cf <- function(alldata){
                   lower.tail = FALSE),
     row.names = names(summary(inst1)$coefficients[,1])
   )
-  cesout <- try(nlsLM(out ~ nested_ces_log(hc1, pinvest1, tau1, govinvest1,
-                                           theta_h, theta_p, ces_delta, mu, rho)
-                      + delta + alpha*cf + alpha3*peducation, data = alldata,
-                      start=c(delta=0.3, alpha=0, alpha3=.05, theta_h=0.3, theta_p=0.5, ces_delta=0.5, mu=-0.5, rho=-0.5),
-                      lower=c(-Inf, -Inf, -Inf, 0.01, 0.01, 0.01, -5, -5),
-                      upper=c(Inf, Inf, Inf, 0.99, 0.99, 0.99, 0.99, 0.99),
-                      control=nls.lm.control(maxiter=1000)), silent=FALSE)
-  check_production_fit(cesout, 1L, TRUE)
+  cesout <- fit_production_ces(
+    out ~ nested_ces_log(hc1, pinvest1, tau1, govinvest1, theta_h, theta_p, ces_delta, mu, rho)
+          + delta + alpha*cf + alpha3*peducation,
+    alldata, 1L, TRUE, diagnose=diagnose
+  )
   if (length(summary(cesout))==11) {  
     npar <- nrow(summary(cesout)[[10]])
     outer_elast <- 1 / (1 - (summary(cesout)[[10]][npar,1]))
@@ -284,7 +409,13 @@ for (boot in 0:Bootstrap){
   # Estimation on true data
   if (boot==0){
     setwd(dir_output)
+    monetary_contract <- NULL
+    time_contract <- NULL
     load("trueFM.R")
+    if (!identical(time_contract, "activity_index_capacity_v3")) stop("Rerun the activity-index factor estimation; incompatible trueFM.R.")
+    if (!identical(monetary_contract, "annual_real_2026_maternal_wage_fixed_income_v4")) {
+      stop("trueFM.R uses an incompatible budget. Rerun the factor estimation.")
+    }
     data <- drawfactor(mean.mix, cov.mix, prob.mix)
     alldata <- data[[1]]
     # CES period 3, without control functions
@@ -345,17 +476,23 @@ for (boot in 0:Bootstrap){
     save(coef_ces3, file="coef_ces3.R")
     save(coef_ces2, file="coef_ces2.R")
     save(coef_ces1, file="coef_ces1.R")
-    write.csv(do.call(rbind, production_fit_diagnostics),
-              file.path(dir_output, "production_fit_diagnostics.csv"), row.names = FALSE)
+    write_ces_fit_diagnostics(dir_output)
     export_rev3_bundle(
       dir_output, list(trueCESperiod1, trueCESperiod2, trueCESperiod3),
-      prob.mix, mean.mix, cov.mix, namef, data_file
+      prob.mix, mean.mix, cov.mix, namef, data_file, monetary_contract,
+      time_contract, nonlabor_means, calibration_sample_size
     )
   }
   # Estimation on bootstrap data
   else if (boot==1){
     setwd(dir_output)
+    monetary_contract <- NULL
+    time_contract <- NULL
     load("allbootFM.R")
+    if (!identical(time_contract, "activity_index_capacity_v3")) stop("Rerun the activity-index bootstrap; incompatible allbootFM.R.")
+    if (!identical(monetary_contract, "annual_real_2026_maternal_wage_fixed_income_v4")) {
+      stop("allbootFM.R uses an incompatible budget. Rerun the factor bootstrap.")
+    }
     # Define a function that runs the estimation on each bootstrap sample
     bootprod <- function(b){  
       prob.boot <- bootFM[[b]]$prob
@@ -364,25 +501,25 @@ for (boot in 0:Bootstrap){
       alldatab <- drawfactor(mean.boot, cov.boot, prob.boot)[[1]]
       print(summary(alldatab[, c("hc3", "govinvest3", "pinvest3", "peducation")]))
       # CES period 3, without control functions
-      out_ces3_nocf <- CES3_nocf(alldatab)
+      out_ces3_nocf <- CES3_nocf(alldatab, diagnose=FALSE)
       # CES period 3, with control functions
-      out3 <- CES3_cf(alldatab)
+      out3 <- CES3_cf(alldatab, diagnose=FALSE)
       out_ces3_cf <- out3[[1]]
       coef_ces3 <- out3[[3]]
       # Investment in period 3
       outInvest3 <- out3[[2]]
       # CES period 2, without control functions
-      out_ces2_nocf <- CES2_nocf(alldatab)
+      out_ces2_nocf <- CES2_nocf(alldatab, diagnose=FALSE)
       # CES period 2, with control functions
-      out2 <- CES2_cf(alldatab)
+      out2 <- CES2_cf(alldatab, diagnose=FALSE)
       out_ces2_cf <- out2[[1]]
       coef_ces2 <- out2[[3]]
       # Investment in period 2
       outInvest2 <- out2[[2]]
       # CES period 1, without control functions
-      out_ces1_nocf <- CES1_nocf(alldatab)
+      out_ces1_nocf <- CES1_nocf(alldatab, diagnose=FALSE)
       # CES period 1, with control functions
-      out1 <- CES1_cf(alldatab)
+      out1 <- CES1_cf(alldatab, diagnose=FALSE)
       out_ces1_cf <- out1[[1]]
       coef_ces1 <- out1[[3]]
       # Investment in period 1

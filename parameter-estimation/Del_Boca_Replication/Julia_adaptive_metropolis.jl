@@ -49,15 +49,7 @@ end
 
 # Model dimensions come from Rev3 so solver and estimator cannot drift apart.
 const NUM_PARAMETERS = length(PARAMETER_NAMES)
-const HOUSEHOLD_COLUMN_NAMES = [
-    "Parent Human Capital",
-    "Wage Rate Trajectory",
-    "Government Inputs",
-    "Optimal Consumption",
-    "Optimal Parental Investment",
-    "Optimal Leisure",
-    "Child Human Capital"
-]
+const HOUSEHOLD_COLUMN_NAMES = HOUSEHOLD_VARIABLES
 
 # MCMC
 const INITIAL_PARAMS = [10.0, -0.3, 0.4, 0.15, 0.1]
@@ -236,8 +228,8 @@ function SMMAdaptiveMetropolis(;
                            create_households(initial_households) : copy(households)
     num_current_households = size(simulated_households, 1)
     1 < num_current_households <= max_households || error("Household sample exceeds configured limits.")
-    size(simulated_households, 2) == NUM_PERIODS && size(simulated_households, 3) == 7 ||
-        error("Expected households with dimensions N by $NUM_PERIODS by 7.")
+    size(simulated_households, 2) == NUM_PERIODS && size(simulated_households, 3) == NUM_HOUSEHOLD_COLUMNS ||
+        error("Expected households with dimensions N by $NUM_PERIODS by $NUM_HOUSEHOLD_COLUMNS.")
 
     # Load or generate empirical moments
     # NOTE: once we have empirical moments, these lines need to be changed
@@ -915,7 +907,7 @@ function checkpoint_context()
                     joinpath(@__DIR__, "..", "..", "dsge-simulations", "new_CES_solver.jl"),
                     joinpath(@__DIR__, "..", "Manifest.toml")]
     export_files = vcat([REV3_BRIDGE_FILENAME, MIXTURE_PROBABILITIES_FILENAME, MIXTURE_MEANS_FILENAME],
-                        MIXTURE_COVARIANCE_FILENAMES)
+                        MIXTURE_COVARIANCE_FILENAMES, ["involvement_calibration.csv", "rev3_export_manifest.csv"])
     export_hashes = Dict(file => (isfile(joinpath(attanasio_output_dir(), file)) ?
                          bytes2hex(sha256(read(joinpath(attanasio_output_dir(), file)))) : nothing)
                          for file in export_files)
@@ -923,6 +915,10 @@ function checkpoint_context()
                 "technology" => Dict(string(f) => copy(getfield(true_technology(), f))
                                     for f in fieldnames(TrueCESTechnology)),
                 "policy_mode" => parent_policy_mode(),
+                "involvement_scale" => involvement_scale(),
+                "time_contract" => "activity_index_capacity_v3",
+                "budget_contract" => ATTANASIO_BUDGET_CONTRACT,
+                "grid_points" => (PARENT_POLICY_GRID_POINTS, PARENT_POLICY_PARENT_H_GRID_POINTS),
                 "source_hashes" => [bytes2hex(sha256(read(f))) for f in source_files],
                 "household_seed" => synthetic_household_seed(),
                 "export_hashes" => export_hashes,
@@ -968,7 +964,7 @@ function load_checkpoint!(estimator::SMMAdaptiveMetropolis, prefix::String="smm_
         error("Invalid accepted-move history.")
     length(data["household_count_history"]) == n || error("Invalid household history.")
     length(data["computation_times"]) == n || error("Invalid timing history.")
-    size(data["simulated_households"]) == (data["num_current_households"], NUM_PERIODS, 7) ||
+    size(data["simulated_households"]) == (data["num_current_households"], NUM_PERIODS, NUM_HOUSEHOLD_COLUMNS) ||
         error("Invalid checkpoint household dimensions.")
     length(data["empirical_moments"]) == NUM_MOMENTS || error("Invalid target dimensions.")
     size(data["weighting_matrix"]) == (NUM_MOMENTS, NUM_MOMENTS) || error("Invalid weights.")
@@ -1114,6 +1110,17 @@ function compute_optimal_weighting_matrix_robust(chain::Vector{Vector{Float64}},
     return weighting_matrix, diagnostics, true
 end
 
+function spectral_condition_number(values::AbstractVector{<:Real})
+    isempty(values) && error("Eigenvalue vector must not be empty.")
+    all(isfinite, values) || error("Eigenvalues must be finite.")
+    magnitudes = abs.(values)
+    largest = maximum(magnitudes)
+    # Relative tolerance keeps the diagnostic invariant to monetary units.
+    tolerance = length(values) * eps(Float64) * largest
+    smallest = minimum(magnitudes)
+    return smallest <= tolerance ? Inf : largest / smallest
+end
+
 function enforce_positive_semidefinite(moment_cov::Matrix{Float64}, 
                                      num_moments::Int;
                                      min_eigenval::Float64 = 1e-8,
@@ -1138,19 +1145,23 @@ function enforce_positive_semidefinite(moment_cov::Matrix{Float64},
     """
     
     println("Checking positive semi-definiteness...")
-    eigenvals, eigenvecs = eigen(moment_cov)
+    size(moment_cov) == (num_moments, num_moments) || error("Invalid covariance dimensions.")
+    all(isfinite, moment_cov) || error("Covariance must be finite.")
+    isapprox(moment_cov, moment_cov'; rtol=1e-10, atol=0.0) || error("Covariance must be symmetric.")
+    eigenvals, eigenvecs = eigen(Symmetric((moment_cov + moment_cov') / 2))
     
     println("Eigenvalue range: [$(minimum(eigenvals)):.2e, $(maximum(eigenvals)):.2e]")
     
     # Count problematic eigenvalues
     negative_eigs = sum(eigenvals .< 0)
-    near_zero_eigs = sum(abs.(eigenvals) .< 1e-12)
+    singular_tolerance = length(eigenvals) * eps(Float64) * maximum(abs.(eigenvals))
+    near_zero_eigs = sum(abs.(eigenvals) .<= singular_tolerance)
     
     if negative_eigs > 0
         println("Warning: $negative_eigs negative eigenvalues detected")
     end
     if near_zero_eigs > 0
-        println("Warning: $near_zero_eigs near-zero eigenvalues detected (< 1e-12)")
+        println("Warning: $near_zero_eigs numerically zero eigenvalues detected (tolerance $singular_tolerance)")
     end
         
     # Eigenvalue regularization
@@ -1164,7 +1175,7 @@ function enforce_positive_semidefinite(moment_cov::Matrix{Float64},
     moment_cov_final = moment_cov_psd + diagonal_reg_matrix
     
     # Verify final matrix is PSD
-    final_eigenvals = eigvals(moment_cov_final)
+    final_eigenvals = eigvals(Symmetric(moment_cov_final))
     min_final_eig = minimum(final_eigenvals)
     
     if min_final_eig > 0
@@ -1174,7 +1185,7 @@ function enforce_positive_semidefinite(moment_cov::Matrix{Float64},
     end
         
     # Compute condition number
-    condition_number = maximum(final_eigenvals) / minimum(final_eigenvals)
+    condition_number = spectral_condition_number(final_eigenvals)
     println("Condition number: $(condition_number):.2e")
     
     if condition_number > 1e12
@@ -1182,6 +1193,7 @@ function enforce_positive_semidefinite(moment_cov::Matrix{Float64},
     end
         
     # Compute weighting matrix
+    local weighting_matrix
     try
         weighting_matrix = inv(moment_cov_final)
         
@@ -1204,7 +1216,7 @@ function enforce_positive_semidefinite(moment_cov::Matrix{Float64},
         "original_eigenvalues" => eigenvals,
         "regularized_eigenvalues" => regularized_eigenvals,
         "final_eigenvalues" => final_eigenvals,
-        "condition_number_original" => minimum(abs.(eigenvals)) > 0 ? maximum(abs.(eigenvals)) / minimum(abs.(eigenvals)) : Inf,
+        "condition_number_original" => spectral_condition_number(eigenvals),
         "condition_number_final" => condition_number,
         "negative_eigenvalues" => negative_eigs,
         "near_zero_eigenvalues" => near_zero_eigs,

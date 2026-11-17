@@ -1,6 +1,6 @@
-# Preliminary Del Boca implementation with the tau feasibility workaround.
-# Synthetic household construction conditions the exported mixture draws on
-# feasible time shares. Realized production shocks use fixed common draws.
+# Preliminary Del Boca implementation with a calibrated activity index.
+# Synthetic households use unfiltered joint draws. Physical nonwork is mapped
+# to involvement with a fixed pooled calibration; utility still uses nonwork.
 # Parent policies come from new_CES_solver, and DX-NES parallelizes candidate
 # evaluations while each candidate applies its solved policy serially.
 
@@ -19,12 +19,13 @@ include(joinpath(@__DIR__, "..", "..", "dsge-simulations", "new_CES_solver.jl"))
 const NUMBER_OF_HOUSEHOLDS = 10000
 const HOUSEHOLD_VARIABLES = [
     "Parent Human Capital",
-    "Wage Rate Trajectory",
+    "Maternal Earnings per Unit Labor (Real 2026 Dollars)",
     "Government Inputs",
     "Optimal Consumption",
     "Optimal Parental Investment",
-    "Optimal Leisure",
-    "Child Human Capital Trajectory"
+    "Educational Involvement Index",
+    "Child Human Capital Trajectory",
+    "Fixed Family Income (Real 2026 Dollars)",
 ]
 const NUM_PERIODS = 3
 const NUM_MOMENTS = 18
@@ -41,8 +42,10 @@ const PARENT_POLICY_ETA = 2.0
 const PARENT_POLICY_GAMMA = 2.0
 const PARENT_POLICY_TAX_RATE = 0.0
 const PARENT_POLICY_INITIAL_CHILD_HC = 1.0
-const PARENT_POLICY_GRID_POINTS = 25
-const PARENT_POLICY_PARENT_H_GRID_POINTS = 10
+const PARENT_POLICY_GRID_POINTS = parse(Int, get(ENV, "IEHC_CHILD_GRID_POINTS", "25"))
+const PARENT_POLICY_PARENT_H_GRID_POINTS = parse(Int, get(ENV, "IEHC_PARENT_GRID_POINTS", "10"))
+PARENT_POLICY_GRID_POINTS >= 3 || error("Child grid needs at least three points.")
+PARENT_POLICY_PARENT_H_GRID_POINTS >= 2 || error("Parent grid needs at least two points.")
 
 # The true nested-CES parameters are fixed by Attanasio. Rev3 estimates the
 # terminal utility weight and the technology parents perceive, as proposed in
@@ -139,10 +142,14 @@ end
 function bilinear_policy_interp(policy_values, hc_grid, parent_h_grid, t, hc, parent_h)
     hc_hi = clamp(searchsortedfirst(hc_grid, hc), 2, length(hc_grid))
     hc_lo = hc_hi - 1
+    hc_weight = (hc - hc_grid[hc_lo]) / (hc_grid[hc_hi] - hc_grid[hc_lo])
+    if length(parent_h_grid) == 1
+        return (1.0 - hc_weight) * policy_values[t, hc_lo, 1] +
+               hc_weight * policy_values[t, hc_hi, 1]
+    end
     parent_hi = clamp(searchsortedfirst(parent_h_grid, parent_h), 2, length(parent_h_grid))
     parent_lo = parent_hi - 1
 
-    hc_weight = (hc - hc_grid[hc_lo]) / (hc_grid[hc_hi] - hc_grid[hc_lo])
     parent_weight = (parent_h - parent_h_grid[parent_lo]) /
                     (parent_h_grid[parent_hi] - parent_h_grid[parent_lo])
     low_parent_value = (1.0 - hc_weight) * policy_values[t, hc_lo, parent_lo] +
@@ -161,16 +168,16 @@ function solve_parent_policy(parameter_values::Vector{Float64}, households::Arra
     delta, perceived_rho, theta_1, theta_2, theta_3 = Float64.(parameter_values)
     perceived_theta_h = [theta_1, theta_2, theta_3]
     technology = true_technology()
+    kappa = involvement_scale()
 
-    # For large-N SMM, the expensive dynamic-programming solve should happen
-    # once per parameter vector, not once per household. The new CES solver
-    # spans both child and parent human capital. Solving this
-    # common 2D policy once preserves parent-HC heterogeneity while retaining
-    # the large-N advantage over solving dynamic programming per household.
+    # A single-row batch supplies that household's trajectories. Averaging
+    # across multiple rows is used only for the shared-policy approximation.
     representative_parent_hc = max(mean(households[:, 1, 1]), 1e-8)
-    wages = max.(vec(mean(households[:, :, 2], dims=1)), 1e-8)
+    wages = vec(mean(households[:, :, 2], dims=1))
+    transfers = vec(mean(households[:, :, FIXED_INCOME_COLUMN], dims=1))
+    all(x -> isfinite(x) && x>0, wages) || error("Invalid maternal earnings rate.")
+    all(x -> isfinite(x) && x>=0, transfers) || error("Invalid fixed family income.")
     public_inputs = max.(vec(mean(households[:, :, 3], dims=1)), 1e-8)
-    transfers = zeros(NUM_PERIODS)
     tau = fill(PARENT_POLICY_TAX_RATE, NUM_PERIODS)
 
     hc_grid = hc_grid === nothing ? child_hc_grid(PARENT_POLICY_INITIAL_CHILD_HC, representative_parent_hc) : hc_grid
@@ -204,6 +211,8 @@ function solve_parent_policy(parameter_values::Vector{Float64}, households::Arra
             # every period's flow payoff.
             b=[0.0, 0.0, delta],
             tau=tau,
+            wage_per_efficiency_unit=false,
+            involvement_scale=kappa,
             sigma_h=technology.residual_sd,
             perceived_theta_p=technology.theta_p,
             perceived_ces_delta=technology.ces_delta,
@@ -219,6 +228,7 @@ function solve_parent_policy(parameter_values::Vector{Float64}, households::Arra
             periods=NUM_PERIODS,
         ),
         terminal_weight=delta,
+        involvement_scale=kappa,
         true_technology=technology,
         perceived_rho=perceived_rho,
         perceived_theta_h=perceived_theta_h,
@@ -232,7 +242,7 @@ function production_shock_draws(n::Int; seed::Int=20261020)
 end
 
 function parent_policy_mode()
-    mode = Symbol(get(ENV, "IEHC_PARENT_POLICY_MODE", "shared"))
+    mode = Symbol(get(ENV, "IEHC_PARENT_POLICY_MODE", "household"))
     mode in (:shared, :household) || error("IEHC_PARENT_POLICY_MODE must be shared or household.")
     return mode
 end
@@ -251,7 +261,8 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64};
         # public input. This keeps the large-N flow parallel while avoiding an
         # expensive policy solve inside every threaded iteration.
         parent_hc = max(Float64(household[t, 1]), 1e-8)
-        wage = max(Float64(household[t, 2]), 1e-8)
+        wage = household[t, 2]
+        fixed_income = household[t, FIXED_INCOME_COLUMN]
         public_input = max(Float64(household[t, 3]), 1e-8)
 
         labor = bilinear_policy_interp(
@@ -261,7 +272,9 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64};
             policy.e_policy, policy.hc_grid, policy.parent_h_grid, t, current_child_hc, parent_hc,
         )
         labor = clamp(labor, 0.0, 1.0 - 1e-8)
-        resources = (1.0 - PARENT_POLICY_TAX_RATE) * wage * parent_hc * labor
+        # Maternal earnings vary with labor; the remaining family resources
+        # are fixed. Parent HC still affects production, not the wage.
+        resources = fixed_income + (1.0 - PARENT_POLICY_TAX_RATE) * wage * labor
         investment = clamp(desired_investment, 0.0, max(resources - 1e-8, 0.0))
         consumption = resources - investment
         technology = parent_policy.true_technology
@@ -272,7 +285,7 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64};
         deterministic_child_hc = hc_production(
             current_child_hc,
             investment,
-            1.0 - labor,
+            parent_policy.involvement_scale * (1.0 - labor),
             public_input,
             true_productivity,
             technology.theta_h[t],
@@ -288,8 +301,10 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64};
         next_child_hc = deterministic_child_hc * exp(technology.residual_sd[t] * shock_draws[t])
 
         # Stable household contract: consumption, monetary investment,
-        # leisure, and realized child human capital occupy columns 4 through 7.
-        solved[t, :] = [consumption, investment, 1.0 - labor, next_child_hc]
+        # Involvement is an index, not a leisure share. The budget and utility
+        # use physical labor/nonwork; SMM compares the activity-factor moments.
+        solved[t, :] = [consumption, investment,
+                        parent_policy.involvement_scale * (1.0 - labor), next_child_hc]
         current_child_hc = max(next_child_hc, 1e-8)
     end
 
@@ -297,18 +312,13 @@ function solve_household_from_policy(parent_policy, household::Matrix{Float64};
 end
 
 function solve_household(parameters::Vector{Float64}, household::Matrix{Float64})::Matrix{Float64}
-    household_batch = zeros(1, size(household, 1), size(household, 2))
-    household_batch[1, :, :] = household
-    parent_policy = solve_parent_policy(parameters, household_batch)
-    return solve_household_from_policy(parent_policy, household)
+    batch = reshape(copy(household), 1, size(household)...)
+    return solve_households(batch, parameters, 1; policy_mode=:household)[1, :, 4:7]
 end
 
 function solve_one(args)::Array{Float64, 2}
     parent_policy, hh = args
-    # A household solve now applies a reusable parent policy instead of
-    # recomputing dynamic programming for this household. That is the key
-    # large-N runtime improvement: O(1) policy solves per SMM parameter vector
-    # instead of O(number of households).
+    # Apply an already-solved policy.
     solved = solve_household_from_policy(parent_policy, hh)
     return solved
 end
@@ -317,7 +327,8 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
                           policy_mode::Symbol=parent_policy_mode(),
                           shock_draws=production_shock_draws(size(households, 1)))::Array{Float64, 3}
     """
-    Solves households in parallel using a single reusable parent policy.
+    Solves households in parallel with their own policies by default.
+    The shared mode uses a single policy at average income and public inputs.
 
     Arguments
     ---------
@@ -334,16 +345,28 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
         The updated households array with the solution results assigned to the appropriate columns.
     """
     policy_mode in (:shared, :household) || error("Unknown parent policy mode: $policy_mode")
+    size(households, 1) > 0 || error("At least one household is required.")
+    size(households, 2) == NUM_PERIODS && size(households, 3) == NUM_HOUSEHOLD_COLUMNS ||
+        error("Households must include three periods and all eight columns, including fixed family income.")
     size(shock_draws) == (size(households, 1), NUM_PERIODS) || error("Invalid production shock dimensions.")
     all(isfinite, shock_draws) || error("Production shocks must be finite.")
     worker_count = num_workers <= 0 ? Threads.nthreads() : min(num_workers, Threads.nthreads())
-    parent_policy = solve_parent_policy(parameters, households)
+    hc_grid = child_hc_grid(PARENT_POLICY_INITIAL_CHILD_HC, max(mean(households[:, 1, 1]), 1e-8))
+    parent_grid = parent_hc_grid(households)
+    shared_policy = policy_mode == :shared ?
+        solve_parent_policy(parameters, households; hc_grid, parent_grid) : nothing
     results = Vector{Array{Float64, 2}}(undef, size(households, 1))
     function solve_index(i)
-        policy = policy_mode == :shared ? parent_policy : solve_parent_policy(
-            parameters, households[i:i, :, :];
-            hc_grid=parent_policy.policy.hc_grid, parent_grid=parent_policy.policy.parent_h_grid,
-        )
+        policy = if policy_mode == :shared
+            shared_policy
+        else
+            parent_h = households[i, 1, 1]
+            # Attanasio draws one education value per household. Evaluate that
+            # state exactly; the parent's education does not move over time.
+            own_grid = all(==(parent_h), @view(households[i, :, 1])) ?
+                [max(parent_h, 1e-8)] : parent_grid
+            solve_parent_policy(parameters, households[i:i, :, :]; hc_grid, parent_grid=own_grid)
+        end
         return solve_household_from_policy(policy, households[i, :, :]; shock_draws=shock_draws[i, :])
     end
 
@@ -368,19 +391,21 @@ function solve_households(households::Array{Float64, 3}, parameters::Vector{Floa
     end
 
     for i in 1:length(results)
-        households[i, :, 4:end] = results[i]
+        households[i, :, 4:7] = results[i]
     end
     return households
 end
 
 """Compare the shared policy to policies solved at each household's wages and
-public-input trajectory, on identical state grids and production shock draws.
+public-input trajectory, on the same child grid and production shock draws.
 Use a small representative batch: household-specific DP is expensive.
 """
 function benchmark_parent_policies(households::Array{Float64, 3}, parameters::Vector{Float64})
-    shared = solve_households(copy(households), parameters, 1; policy_mode=:shared)
-    individual = solve_households(copy(households), parameters, 1; policy_mode=:household)
+    shared_run = @timed solve_households(copy(households), parameters, 1; policy_mode=:shared)
+    individual_run = @timed solve_households(copy(households), parameters, 1; policy_mode=:household)
+    shared, individual = shared_run.value, individual_run.value
     return (shared_moments=moments(shared), household_moments=moments(individual),
+            shared_seconds=shared_run.time, household_seconds=individual_run.time,
             moment_difference=moments(shared) - moments(individual),
             max_choice_difference=maximum(abs.(shared[:, :, 4:6] - individual[:, :, 4:6])))
 end
@@ -388,14 +413,14 @@ end
 function moments(households::Array{Float64, 3})::Vector{Float64}
     moments = zeros(NUM_MOMENTS)
     # The columns for each respective moment (adjusted for 1-based indexing)
-    moment_leisure = 6
+    moment_involvement = 6
     moment_expenditure = 5
     moment_child_hc = 7
     for i in 1:NUM_PERIODS
-        moments[i] = mean(households[:, i, moment_leisure])
+        moments[i] = mean(households[:, i, moment_involvement])
         moments[i + NUM_PERIODS] = mean(households[:, i, moment_expenditure])
         moments[i + 2*NUM_PERIODS] = mean(households[:, i, moment_child_hc])
-        moments[i + 3*NUM_PERIODS] = std(households[:, i, moment_leisure])
+        moments[i + 3*NUM_PERIODS] = std(households[:, i, moment_involvement])
         moments[i + 4*NUM_PERIODS] = std(households[:, i, moment_expenditure])
         moments[i + 5*NUM_PERIODS] = std(households[:, i, moment_child_hc])
     end
@@ -432,9 +457,8 @@ function rev3_smm_objective(
 
     try
         parameters = Float64.(collect(parameter_values))
-        # DX-NES evaluates parameter vectors concurrently. Each evaluation gets
-        # its own household copy and runs household application serially, which
-        # prevents data races and nested-thread oversubscription.
+        # Each candidate gets its own household copy. The caller decides
+        # whether to parallelize candidates or household policy solves.
         solved = solve_households(copy(households), parameters, household_workers)
         simulated_moments = moments(solved)
         moment_difference = simulated_moments - empirical_moments
@@ -476,6 +500,7 @@ function optimize_parameters_dxnes(
     initial_guess::Union{Nothing, Vector{Float64}}=nothing,
     trace_mode::Symbol=:compact,
 )
+    involvement_scale() # Fail before optimization if the required calibration was not loaded.
     length(lower_bounds) == length(PARAMETER_NAMES) ||
         error("Expected $(length(PARAMETER_NAMES)) lower bounds.")
     length(upper_bounds) == length(PARAMETER_NAMES) ||
@@ -491,13 +516,16 @@ function optimize_parameters_dxnes(
     end
     random_seed === nothing || Random.seed!(random_seed)
 
+    # BlackBoxOptim reserves a thread for coordination. If there are no outer
+    # workers, use the available threads for household policy solves instead.
+    available_optimizer_workers = min(optimizer_threads, Threads.nthreads() - 1)
     objective = candidate -> rev3_smm_objective(
         candidate,
         empirical_moments,
         households;
         weighting_matrix=weighting_matrix,
         standardize_moments=standardize_moments,
-        household_workers=1,
+        household_workers=available_optimizer_workers > 0 ? 1 : 0,
     )
     search_range = collect(zip(lower_bounds, upper_bounds))
     options = (
@@ -509,9 +537,6 @@ function optimize_parameters_dxnes(
         TraceMode=trace_mode,
     )
 
-    # BlackBoxOptim reserves one Julia thread to coordinate its workers. Fall
-    # back to serial DX-NES when Julia was launched with only one thread.
-    available_optimizer_workers = min(optimizer_threads, Threads.nthreads() - 1)
     result = if available_optimizer_workers > 0 && initial_guess === nothing
         BlackBoxOptim.bboptimize(objective; options..., NThreads=available_optimizer_workers)
     elseif available_optimizer_workers > 0

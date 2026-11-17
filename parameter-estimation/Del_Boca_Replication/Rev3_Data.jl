@@ -12,7 +12,7 @@ const DEFAULT_IEHC_NLSY_DATA_FILE = normpath(
     ),
 )
 const DEFAULT_IEHC_ATTANASIO_OUTPUT_DIR = normpath(
-    joinpath(@__DIR__, "..", "Attanasio Replication", "VDE DelBoca Export"),
+    joinpath(@__DIR__, "..", "Attanasio Replication", "Our Most Recent Output"),
 )
 const REV3_BRIDGE_FILENAME = "attanasio_rev3_bridge.csv"
 const MIXTURE_PROBABILITIES_FILENAME = "mixture_probabilities.csv"
@@ -24,13 +24,63 @@ const ATTANASIO_MIXTURE_VARIABLES = [
     "pinvest3", "govinvest1", "govinvest2", "govinvest3", "peducation",
     "income1", "income2", "income3", "centerprice1", "familyprice1",
     "centerprice2", "familyprice2", "centerprice3", "familyprice3",
+    "capacity1", "capacity2", "capacity3", "fixedincome1", "fixedincome2", "fixedincome3",
 ]
+const FIXED_INCOME_COLUMN = 8
+const NUM_HOUSEHOLD_COLUMNS = FIXED_INCOME_COLUMN
+const ATTANASIO_BUDGET_CONTRACT = "annual_real_2026_maternal_wage_fixed_income_v4"
+const ACTIVE_INVOLVEMENT_SCALE = Ref{Union{Nothing, Float64}}(nothing)
+
+function set_involvement_scale!(value::Real)
+    isfinite(value) && value > 0 || error("Involvement scale must be finite and positive.")
+    ACTIVE_INVOLVEMENT_SCALE[] = Float64(value)
+    return Float64(value)
+end
+
+function involvement_scale()
+    value = ACTIVE_INVOLVEMENT_SCALE[]
+    value === nothing && error("Load the Attanasio calibration before simulation.")
+    return value
+end
+
+function load_involvement_calibration(export_dir::String)
+    table = CSV.read(joinpath(export_dir, "involvement_calibration.csv"), DataFrame)
+    required = ["period", "kappa", "mean_involvement", "variance_involvement", "mean_nonlabor", "method"]
+    all(in(names(table)), required) || error("Incomplete involvement calibration.")
+    sort!(table, :period)
+    table.period == collect(1:3) || error("Calibration must have three period rows.")
+    all(==("pooled_mean_ratio_activity_index"), table.method) || error("Unsupported calibration method.")
+    all(isfinite, Matrix(table[:, required[2:5]])) || error("Nonfinite involvement calibration.")
+    all(table.mean_involvement .> 0) && all(table.variance_involvement .>= 0) &&
+        all(0 .<= table.mean_nonlabor .< 1) && mean(table.mean_nonlabor)>0 || error("Invalid calibration moments.")
+    calibrated = mean(table.mean_involvement) / mean(table.mean_nonlabor)
+    all(isapprox.(table.kappa, calibrated; rtol=1e-8)) || error("Inconsistent pooled kappa.")
+    test_mode = get(ENV, "IEHC_INVOLVEMENT_TEST_MODE", "0") == "1"
+    scale = test_mode ? 1.0 : parse(Float64, get(ENV, "IEHC_INVOLVEMENT_SCALE", string(calibrated)))
+    isfinite(scale) && scale>0 || error("Invalid IEHC_INVOLVEMENT_SCALE.")
+    minimum_scale = table.mean_involvement .+ table.variance_involvement ./ table.mean_involvement
+    if any(scale .< minimum_scale)
+        message = "Involvement moments cannot be matched by kappa*(1-labor): kappa=$scale, required minima=$minimum_scale. Review the calibration; no draws were filtered."
+        test_mode ? (@warn message) : error(message)
+    end
+    set_involvement_scale!(scale)
+    return (kappa=scale, calibrated_kappa=calibrated, test_mode=test_mode, table=table)
+end
 const CEX_EXPENDITURE_COLUMN =
     "CEX Cumulative Household Education Expenditure (Real 2026 Dollars)"
 const CEX_MATCHED_YEARS_COLUMN = "CEX Years Successfully Matched"
 const CEX_COVERAGE_COLUMN = "CEX Coverage Share"
 const HEAD_START_EXPOSURE_COLUMN = "CHILD_EVER_ENROLLED_IN_HEAD"
 const PARENT_EDUCATION_COLUMN = "HGC_OF_MOTHER_AS_OF_MAY_1_R"
+
+# Match R's inverse censored-log1p transform; zero fixed income is admissible.
+decode_fixed_family_income(x::Float64) = expm1(max(x, 0.0))
+
+function observed_labor_share(hours)
+    !ismissing(hours) && isfinite(hours) && hours >= 0 ||
+        error("HRSWK_PCY must contain finite nonnegative annual hours.")
+    return clamp(Float64(hours) / (52 * 40), 0.0, 1.0)
+end
 
 Base.@kwdef struct TrueCESTechnology
     intercept::Vector{Float64}
@@ -103,6 +153,7 @@ end
 
 function load_true_technology(filepath::String=attanasio_bridge_file())
     validate_attanasio_bundle(dirname(filepath))
+    load_involvement_calibration(dirname(filepath))
     isfile(filepath) || error(
         "Attanasio bridge not found at $filepath. Run the Attanasio stage before Rev3.",
     )
@@ -222,16 +273,16 @@ end
 function observed_moments(observed::Array{Float64, 3})
     result = zeros(18)
     for period in 1:3
-        leisure = finite_observations(observed[:, period, 6])
+        involvement = finite_observations(observed[:, period, 6])
         expenditure = finite_observations(observed[:, period, 5])
         child_hc = finite_observations(observed[:, period, 7])
-        length(leisure) >= 2 || error("Period $period has too few leisure observations.")
+        length(involvement) >= 2 || error("Period $period has too few involvement observations.")
         length(expenditure) >= 2 || error("Period $period has too few qualifying CEX observations.")
         length(child_hc) >= 2 || error("Period $period has too few child-HC observations.")
-        result[period] = mean(leisure)
+        result[period] = mean(involvement)
         result[period + 3] = mean(expenditure)
         result[period + 6] = mean(child_hc)
-        result[period + 9] = std(leisure)
+        result[period + 9] = std(involvement)
         result[period + 12] = std(expenditure)
         result[period + 15] = std(child_hc)
     end
@@ -239,134 +290,8 @@ function observed_moments(observed::Array{Float64, 3})
     return result
 end
 
-function load_rev3_observed_data(
-    filepath::String=nlsy_data_file();
-    maximum_households::Union{Nothing, Int}=nothing,
-)
-    isfile(filepath) || error("NLSY/CEX input file not found at $filepath.")
-    selected_columns = [
-        "id", "period", PARENT_EDUCATION_COLUMN, "LABOR_INCOME", "HRSWK_PCY",
-        HEAD_START_EXPOSURE_COLUMN, "TCURELSC_per_student",
-        "PIAT_MATH", "PIAT_READ_REC", "PIAT_READ_COMP", "PPVT",
-        CEX_EXPENDITURE_COLUMN, CEX_MATCHED_YEARS_COLUMN, CEX_COVERAGE_COLUMN,
-    ]
-    raw = CSV.read(filepath, DataFrame; select=selected_columns)
-    raw = raw[in.(raw.period, Ref(0:2)), :]
-
-    period_ids = [Set(raw.id[raw.period .== period]) for period in 0:2]
-    balanced_ids = sort!(collect(intersect(period_ids...)))
-    isempty(balanced_ids) && error("No household IDs are observed in all three periods.")
-    if maximum_households !== nothing
-        maximum_households > 0 || error("maximum_households must be positive.")
-        balanced_ids = balanced_ids[1:min(maximum_households, length(balanced_ids))]
-    end
-
-    period_data = DataFrame[]
-    for period in 0:2
-        table = raw[(raw.period .== period) .& in.(raw.id, Ref(Set(balanced_ids))), :]
-        sort!(table, :id)
-        nrow(table) == length(balanced_ids) ||
-            error("Period $period contains duplicate or missing rows for balanced IDs.")
-        table.id == balanced_ids ||
-            error("Period $period does not align with the balanced household IDs.")
-        push!(period_data, table)
-    end
-
-    # Attanasio estimates the production function after pooling periods 0-2,
-    # z-scoring each observed covariate, and exponentiating the joint-factor
-    # draw. Apply that same exp(z-score) map before the bridge coefficients enter
-    # Rev3. A missing source value maps to exp(0)=1, the normalized pooled mean.
-    normalization_source = raw[
-        in.(raw.id, Ref(Set(balanced_ids))),
-        :,
-    ]
-    attanasio_normalizations = (
-        parent_education=attanasio_normalization(
-            normalization_source[!, PARENT_EDUCATION_COLUMN];
-            variable_name=PARENT_EDUCATION_COLUMN,
-        ),
-        head_start=attanasio_normalization(
-            normalization_source[!, HEAD_START_EXPOSURE_COLUMN];
-            variable_name=HEAD_START_EXPOSURE_COLUMN,
-            unit_interval=true,
-        ),
-        school_spending=attanasio_normalization(
-            normalization_source.TCURELSC_per_student;
-            variable_name="TCURELSC_per_student",
-            log_positive=true,
-        ),
-    )
-
-    n_households = length(balanced_ids)
-    observed = fill(NaN, n_households, 3, 7)
-    parent_hc = apply_attanasio_normalization(
-        period_data[1][!, PARENT_EDUCATION_COLUMN],
-        attanasio_normalizations.parent_education,
-    )
-    observed[:, :, 1] .= reshape(parent_hc, n_households, 1)
-
-    baseline_scales = Dict{String, Float64}()
-    score_columns = ["PIAT_MATH", "PIAT_READ_REC", "PIAT_READ_COMP", "PPVT"]
-    for column in score_columns
-        baseline = median_impute(period_data[1][!, column])
-        baseline_scales[column] = sqrt(mean(abs2, baseline))
-    end
-
-    minimum_coverage = cex_minimum_coverage()
-    qualifying_cex = zeros(Int, 3)
-    for period in 1:3
-        table = period_data[period]
-        income_scale = positive_median(table.LABOR_INCOME)
-        observed[:, period, 2] = clamp.(median_impute(table.LABOR_INCOME) ./ income_scale, 0.05, 4.0)
-        if period == 1
-            observed[:, period, 3] = apply_attanasio_normalization(
-                table[!, HEAD_START_EXPOSURE_COLUMN],
-                attanasio_normalizations.head_start,
-            )
-        else
-            observed[:, period, 3] = apply_attanasio_normalization(
-                table.TCURELSC_per_student,
-                attanasio_normalizations.school_spending,
-            )
-        end
-        hours = median_impute(table.HRSWK_PCY)
-        observed[:, period, 6] = 1.0 .- clamp.(hours ./ (52.0 * 40.0), 0.0, 1.0)
-
-        cumulative = table[!, CEX_EXPENDITURE_COLUMN]
-        matched_years = table[!, CEX_MATCHED_YEARS_COLUMN]
-        coverage = table[!, CEX_COVERAGE_COLUMN]
-        for row in 1:n_households
-            eligible = !ismissing(cumulative[row]) && !ismissing(matched_years[row]) &&
-                       !ismissing(coverage[row]) && Float64(matched_years[row]) > 0.0 &&
-                       Float64(coverage[row]) >= minimum_coverage
-            if eligible
-                observed[row, period, 5] =
-                    (Float64(cumulative[row]) / Float64(matched_years[row])) / income_scale
-                qualifying_cex[period] += 1
-            end
-        end
-
-        score_components = hcat([
-            median_impute(table[!, column]) ./ baseline_scales[column]
-            for column in score_columns
-        ]...)
-        observed[:, period, 7] = vec(mean(score_components, dims=2))
-    end
-
-    empirical_moments = observed_moments(observed)
-    households = copy(observed)
-    households[:, :, 4:7] .= 0.0
-    return (
-        households=households,
-        observed=observed,
-        empirical_moments=empirical_moments,
-        ids=balanced_ids,
-        n_households=n_households,
-        qualifying_cex=qualifying_cex,
-        cex_minimum_coverage=minimum_coverage,
-        attanasio_normalization=attanasio_normalizations,
-        filepath=filepath,
-    )
+function load_rev3_observed_data(args...; kwargs...)
+    error("Raw observed proxies are not activity-factor targets. Run Attanasio and use load_rev3_data with its schema-4 bundle.")
 end
 
 function validated_covariance(table::DataFrame, component::Int)
@@ -445,17 +370,19 @@ function validate_attanasio_bundle(export_dir::String)
     isfile(joinpath(export_dir, "rev3_export_in_progress")) &&
         error("Attanasio bundle export is incomplete; rerun the R export.")
     manifest_path = joinpath(export_dir, "rev3_export_manifest.csv")
-    # Preserve compatibility with the disclosure-approved historical VDE bundle.
-    isfile(manifest_path) || return nothing
+    isfile(manifest_path) || error("Missing manifest. Reestimate and export Attanasio with schema 4; do not relabel legacy VDE files.")
     manifest = CSV.read(manifest_path, DataFrame; types=String)
-    required_columns = ["schema_version", "run_id", "created_utc", "input_file", "input_sha256", "file", "sha256"]
+    required_columns = ["schema_version", "monetary_contract", "time_contract", "run_id", "created_utc", "input_file", "input_sha256", "file", "sha256"]
     names(manifest) == required_columns || error("Invalid Attanasio export manifest columns.")
     expected = vcat([REV3_BRIDGE_FILENAME, MIXTURE_PROBABILITIES_FILENAME, MIXTURE_MEANS_FILENAME],
-                    MIXTURE_COVARIANCE_FILENAMES)
+                    MIXTURE_COVARIANCE_FILENAMES, ["involvement_calibration.csv"])
     nrow(manifest) == length(expected) && Set(manifest.file) == Set(expected) ||
-        error("Attanasio manifest must cover the complete five-file bundle.")
-    all(==("1"), manifest.schema_version) && length(unique(manifest.run_id)) == 1 ||
-        error("Unsupported or mixed Attanasio export runs.")
+        error("Attanasio manifest must cover the complete six-file bundle.")
+    all(==("4"), manifest.schema_version) &&
+        all(==("activity_index_capacity_v3"), manifest.time_contract) &&
+        all(==(ATTANASIO_BUDGET_CONTRACT), manifest.monetary_contract) &&
+        length(unique(manifest.run_id)) == 1 ||
+        error("Unsupported or mixed Attanasio export runs. The maternal-wage budget requires fresh schema-4 estimates.")
     for row in eachrow(manifest)
         path = joinpath(export_dir, row.file)
         isfile(path) && bytes2hex(sha256(read(path))) == row.sha256 ||
@@ -490,6 +417,7 @@ function load_rev3_data(
     seed::Int=synthetic_household_seed(),
 )
     distribution = load_attanasio_mixture(export_dir)
+    calibration = load_involvement_calibration(export_dir)
     n_households = maximum_households === nothing ?
                    synthetic_household_count() : maximum_households
     n_households > 1 || error("At least two synthetic households are required.")
@@ -497,34 +425,40 @@ function load_rev3_data(
         distribution, n_households; rng=MersenneTwister(seed),
     )
 
-    # Attanasio's drawfactor routine exponentiates every joint-distribution
-    # draw. Repeating that transformation here puts all synthetic controls and
-    # outcome targets on exactly the scale used by the production estimates.
+    # Match the R factor draws: ordinary logs exponentiate; the three fixed
+    # income columns use the inverse censored-log1p transformation below.
     level_draws = exp.(log_draws)
     all(isfinite, level_draws) || error(
         "Exponentiating the Attanasio draws produced a nonfinite value.",
     )
     column = Dict(name => index for (index, name) in enumerate(ATTANASIO_MIXTURE_VARIABLES))
 
-    observed = fill(NaN, n_households, 3, 7)
+    observed = fill(NaN, n_households, 3, NUM_HOUSEHOLD_COLUMNS)
     observed[:, :, 1] .= reshape(level_draws[:, column["peducation"]], n_households, 1)
-    leisure_clipped = zeros(Int, 3)
     for period in 1:3
-        observed[:, period, 2] = level_draws[:, column["income$period"]]
         observed[:, period, 3] = level_draws[:, column["govinvest$period"]]
         observed[:, period, 5] = level_draws[:, column["pinvest$period"]]
 
-        # tau is the non-labor time share that anchors parental time investment.
-        # Sampling its estimated log factor can place a draw outside the physical
-        # [0, 1] time endowment, so only those impossible draws are projected to
-        # the feasible boundary before constructing the SMM leisure moments.
-        raw_leisure = level_draws[:, column["tau$period"]]
-        leisure_clipped[period] = count(value -> value > 1.0, raw_leisure)
-        observed[:, period, 6] = clamp.(raw_leisure, 0.0, 1.0)
+        # tau retains its historical column name but now denotes involvement.
+        # Values above one are valid; neither clip nor condition the population.
+        observed[:, period, 6] = level_draws[:, column["tau$period"]]
+        observed[:, period, 2] = level_draws[:, column["capacity$period"]]
         observed[:, period, 7] = level_draws[:, column["hc$(period + 1)"]]
+        observed[:, period, FIXED_INCOME_COLUMN] =
+            decode_fixed_family_income.(log_draws[:, column["fixedincome$period"]])
     end
+    all(>(0.0), observed[:, :, 2]) || error("Synthetic maternal earnings rates must be positive.")
 
     empirical_moments = observed_moments(observed)
+    # A bounded structural index need only match the selected moments, not the
+    # lognormal tail point for point. Check attainability without editing targets.
+    sample_means = empirical_moments[1:3]
+    sample_variances = empirical_moments[10:12].^2 .* ((n_households-1)/n_households)
+    sample_minimum_scale = sample_means .+ sample_variances ./ sample_means
+    if any(calibration.kappa .< sample_minimum_scale)
+        message = "The fixed synthetic sample has unattainable involvement moments at the configured kappa. No draws were filtered; review sample/calibration sensitivity."
+        calibration.test_mode ? (@warn message) : error(message)
+    end
     households = copy(observed)
     households[:, :, 4:7] .= 0.0
     component_counts = [count(==(component), components) for component in 1:2]
@@ -535,7 +469,12 @@ function load_rev3_data(
         ids=collect(1:n_households),
         n_households=n_households,
         component_counts=component_counts,
-        leisure_clipped=leisure_clipped,
+        calibration=calibration,
+        sample_minimum_scale=sample_minimum_scale,
+        zero_fixed_income_draws=vec(sum(iszero, observed[:, :, FIXED_INCOME_COLUMN]; dims=1)),
+        proposals=n_households,
+        rejected_proposals=0,
+        acceptance_rate=1.0,
         mixture=distribution,
         seed=seed,
         source=:attanasio_mixture,

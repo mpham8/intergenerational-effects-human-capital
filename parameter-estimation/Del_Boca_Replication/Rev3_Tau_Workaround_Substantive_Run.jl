@@ -36,8 +36,13 @@ function write_substantive_summary(output_dir, data, result, elapsed_seconds)
         DataFrame(moment=1:NUM_MOMENTS, value=data.empirical_moments),
     )
     open(joinpath(output_dir, "SUBSTANTIVE_RUN.txt"), "w") do io
-        println(io, "Full-sample Rev3 tau-workaround estimation run.")
-        println(io, "This is a Del Boca-side partial correction; the bridge was not re-estimated.")
+        println(io, "Preliminary activity-index Del Boca estimation run (schema 4).")
+        println(io, "Family budget: fixed income plus maternal earnings at chosen hours.")
+        println(io, "Synthetic zero fixed-income draws by period: ", data.zero_fixed_income_draws)
+        println(io, "Unfiltered mixture population; fresh activity-index Attanasio estimates required.")
+        println(io, "Involvement scale: ", data.calibration.kappa)
+        println(io, "Pooled data calibration: ", data.calibration.calibrated_kappa)
+        println(io, "TEST CALIBRATION ONLY: ", data.calibration.test_mode)
         println(io, "Input: ", data.filepath)
         println(io, "Households: ", data.n_households)
         println(io, "Mixture component counts: ", data.component_counts)
@@ -66,14 +71,12 @@ function main()
     mkpath(output_dir)
     start_time = time()
 
-    println("FULL-SAMPLE REV3 TAU-WORKAROUND ESTIMATION")
+    println("PRELIMINARY ACTIVITY-INDEX ESTIMATION")
     println("Attanasio export: $input_dir")
     println("Output: $output_dir")
     println("Julia threads: $(Threads.nthreads())")
 
-    # Attanasio is run inside the VDE. The five disclosure-approved aggregate
-    # CSVs are the complete handoff: one bridge plus the mixture distribution
-    # used to generate the fixed synthetic households for Del Boca.
+    # The new budget distribution requires fresh VDE disclosure review.
     load_and_set_true_technology!(joinpath(input_dir, REV3_BRIDGE_FILENAME))
     data = load_rev3_tau_workaround_data(
         input_dir; maximum_households=SUBSTANTIVE_HOUSEHOLDS, seed=SUBSTANTIVE_SEED,

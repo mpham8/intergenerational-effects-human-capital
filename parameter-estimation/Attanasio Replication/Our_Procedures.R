@@ -10,6 +10,8 @@ drawfactor <- function(mean.mix, cov.mix, prob.mix){
   f_with_hc1 <- cbind(hc1 = rep(0, nrow(f)), f)       # log(1) = 0
   fC <- data.frame(exp(f_with_hc1))                   # now hc1 = exp(0) = 1
   colnames(fC) <- c("hc1", namef)                     # prepend name
+  fixed <- match(paste0("fixedincome", 1:3), names(fC))
+  fC[fixed] <- expm1(pmax(f_with_hc1[, fixed, drop=FALSE], 0))
   
   alldata <- data.frame(fC)
   lnalldata <- data.frame(f_with_hc1)

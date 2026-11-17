@@ -32,6 +32,14 @@ if (!file.exists(data_file)) {
 dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
 dir_output <- normalizePath(dir_output, mustWork = TRUE)
 
+# Seed the production run, not just its tests. Record versions for replay;
+# this does not replace a dependency lockfile or adequate bootstrap replication.
+seed_text <- Sys.getenv("IEHC_R_SEED", unset = "20261115")
+run_seed <- suppressWarnings(as.integer(seed_text))
+if (!grepl("^[0-9]+$", seed_text) || is.na(run_seed)) stop("IEHC_R_SEED must be a nonnegative integer within R's integer range.")
+set.seed(run_seed)
+writeLines(c(paste("IEHC_R_SEED:", run_seed), capture.output(RNGkind())),
+           file.path(dir_output, "run_seed.txt"))
 
 
 # Specification of the measurement systems, the setup for the EM algorithm
@@ -56,10 +64,12 @@ suppressMessages(library(Matrix))
 #suppressMessages(library(mixtools))
 #suppressMessages(library(mvtnorm))
 suppressMessages(library(foreign))
+writeLines(capture.output(sessionInfo()), file.path(dir_output, "R_session_info.txt"))
 
 setwd(dir)
 # Load details of the empirical specification: 
 source(inputFM)                             # file specifying the measurement system 
+writeLines(capture.output(sessionInfo()), file.path(dir_output, "R_session_info.txt"))
 
 cor_matrix <- cor(y, use = "complete.obs")
 print("Correlations close to 1 or -1:")
@@ -91,3 +101,4 @@ source ("Our_Estimate_FactorModel.R") # This file estimates the joint distributi
 #Estimate production function parameters using only prices as instruments, income is in the production function
 setwd(dir)
 source("Our_Production_Functions_No4_Incomeinst.r")
+writeLines(capture.output(sessionInfo()), file.path(dir_output, "R_session_info.txt"))

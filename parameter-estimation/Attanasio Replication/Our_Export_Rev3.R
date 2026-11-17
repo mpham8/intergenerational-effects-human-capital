@@ -53,11 +53,18 @@ export_rev3_bridge <- function(output_dir, period_estimates) {
 
 
 export_rev3_bundle <- function(output_dir, period_estimates, prob.mix, mean.mix, cov.mix,
-                               variable_names, input_file) {
+                               variable_names, input_file, monetary_contract,
+                               time_contract, nonlabor_means, calibration_sample_size) {
+  if (!identical(time_contract, "activity_index_capacity_v3"))
+    stop("Reestimate the activity-index measurement model; legacy time factors cannot be relabeled.")
+  if (!identical(monetary_contract, "annual_real_2026_maternal_wage_fixed_income_v4")) {
+    stop("Reestimate Attanasio using the maternal-wage and fixed-income budget in real 2026 dollars.")
+  }
   expected <- c("hc2", "hc3", "hc4", "tau1", "tau2", "tau3",
                 "pinvest1", "pinvest2", "pinvest3", "govinvest1", "govinvest2", "govinvest3",
                 "peducation", "income1", "income2", "income3", "centerprice1", "familyprice1",
-                "centerprice2", "familyprice2", "centerprice3", "familyprice3")
+                "centerprice2", "familyprice2", "centerprice3", "familyprice3",
+                "capacity1", "capacity2", "capacity3", "fixedincome1", "fixedincome2", "fixedincome3")
   if (!requireNamespace("digest", quietly = TRUE)) stop("Install the R package digest to export a verified Rev3 bundle.")
   k <- length(expected)
   stopifnot(identical(as.character(variable_names), expected),
@@ -85,9 +92,33 @@ export_rev3_bundle <- function(output_dir, period_estimates, prob.mix, mean.mix,
     write.csv(table, file.path(staging, paste0("mixture_covariance_", m, ".csv")), row.names = FALSE)
   }
   files <- c("attanasio_rev3_bridge.csv", "mixture_probabilities.csv", "mixture_means.csv",
-             "mixture_covariance_1.csv", "mixture_covariance_2.csv")
+             "mixture_covariance_1.csv", "mixture_covariance_2.csv", "involvement_calibration.csv")
+  # Exact mixture moments avoid Monte Carlo noise in the fixed conversion.
+  stopifnot(length(nonlabor_means)==3L, all(is.finite(nonlabor_means)),
+            all(nonlabor_means >= 0 & nonlabor_means < 1),
+            mean(nonlabor_means)>0, calibration_sample_size>1)
+  index_mean <- index_variance <- numeric(3)
+  for (t in 1:3) {
+    j <- match(paste0("tau", t), expected)
+    variances <- vapply(1:2, function(m) cov.mix[(m-1)*k+j, j], 0.0)
+    index_mean[t] <- sum(prob.mix * exp(mean.mix[,j] + variances/2))
+    index_variance[t] <- sum(prob.mix * exp(2*mean.mix[,j] + 2*variances)) - index_mean[t]^2
+  }
+  kappa <- mean(index_mean) / mean(nonlabor_means)
+  stopifnot(is.finite(kappa), kappa>0, all(is.finite(index_variance)))
+  calibration <- data.frame(period=1:3, kappa=kappa,
+      mean_involvement=index_mean, variance_involvement=index_variance,
+      mean_nonlabor=nonlabor_means, calibration_households=calibration_sample_size,
+      minimum_feasible_kappa=index_mean + index_variance/index_mean,
+      method="pooled_mean_ratio_activity_index")
+  calibration$moment_feasible <- kappa >= calibration$minimum_feasible_kappa
+  if (!all(calibration$moment_feasible)) warning(
+      "Pooled kappa cannot match all involvement means/variances. Review involvement_calibration.csv; do not silently enlarge kappa.")
+  write.csv(calibration, file.path(staging, "involvement_calibration.csv"), row.names=FALSE)
   manifest <- data.frame(
-    schema_version = 1L,
+    schema_version = 4L,
+    monetary_contract = monetary_contract,
+    time_contract = time_contract,
     run_id = basename(staging),
     created_utc = format(Sys.time(), tz = "UTC", usetz = TRUE),
     input_file = normalizePath(input_file, mustWork = TRUE),

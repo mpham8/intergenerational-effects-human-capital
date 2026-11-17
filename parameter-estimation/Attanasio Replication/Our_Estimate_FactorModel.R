@@ -4,12 +4,19 @@
 
 setwd(dir_output)
 
+# These are observed log-dollar inputs, not zero-mean latent factors.
+preserve_mean_indices <- match(c(paste0("pinvest", 1:3), paste0("income", 1:3),
+                                 paste0("capacity", 1:3), paste0("fixedincome", 1:3)), namef)
+stopifnot(!anyNA(preserve_mean_indices), all(preserve_mean_indices > nF))
+monetary_contract <- "annual_real_2026_maternal_wage_fixed_income_v4"
+time_contract <- "activity_index_capacity_v3"
+
 for (boot in 0:Bootstrap){
   
   if (boot==0 & onlyboot==0){
     
   # Estimate distribution of latent factors
-    all <- estim.meas.model(y, nM, nF, freelambda, mstep.start, param.start, conv, freeconstant, constparam, baseline, baselinelambda, baselinemean) 
+    all <- estim.meas.model(y, nM, nF, freelambda, mstep.start, param.start, conv, freeconstant, constparam, baseline, baselinelambda, baselinemean, preserve_mean_indices, loading_ties, constant_ties)
 
   # save estimates to use as starting values in bootstrap
   param.startnew  <- all[[1]]$par
@@ -71,7 +78,8 @@ for (boot in 0:Bootstrap){
 
     mstep.startboot<-list(est$meanboot, est$covboot, prob.mix)
     save(mstep.startboot, file="mstep_startboot.R")
-    save(prob.mix, mean.mix, cov.mix, lambda, eps, nM, nF, bsample, file="trueFM.R")
+    save(prob.mix, mean.mix, cov.mix, lambda, eps, nM, nF, bsample, monetary_contract,
+         time_contract, nonlabor_means, calibration_sample_size, file="trueFM.R")
   }
   if (boot==1  & onlyboot==0){ 
 
@@ -85,7 +93,7 @@ for (boot in 0:Bootstrap){
       bootindex <- sample(nrow(y), nrow(y), replace=TRUE)
       bootsample <- y[bootindex,]
       # Estimate factor model 
-      allboot <- estim.meas.model(bootsample, nM, nF, freelambda, mstep.startboot, param.startnew, conv, freeconstant, constparam, baseline, baselinelambda,baselinemean) 
+      allboot <- estim.meas.model(bootsample, nM, nF, freelambda, mstep.startboot, param.startnew, conv, freeconstant, constparam, baseline, baselinelambda,baselinemean, preserve_mean_indices, loading_ties, constant_ties)
 
       return(allboot[[2]])
     } 
@@ -101,7 +109,7 @@ for (boot in 0:Bootstrap){
     # Now we have a measurement system for each bootstrapped sample of measures.
     # Save estimates along with indexes for estimation of production functions in next step 
     
-    save(bootFM, file="allbootFM.R")
+    save(bootFM, monetary_contract, time_contract, file="allbootFM.R")
     # from these measurement systems, we will draw the latent factors to use them to estimate the pf.
   }
 } 

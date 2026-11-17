@@ -23,7 +23,28 @@ library("gdata")
 ###############################################################
 # DEFINITION OF FUNCTION STARTS HERE
 ############################################################### 
-estim.meas.model <- function(y, nM, nF, freelambda, mstep.start, param.start, conv, freeconstant, constparam, baseline, baselinelambda, baselinemean){
+# Use exactly the same factor-mean restriction when fitting and exporting.
+# Only explicitly normalized factors have weighted mean zero; log activity factors
+# retain their fitted levels. Matrix dimensions also work with several factors.
+reconstruct_factor_means <- function(free_means, probabilities, nF, baselinemean) {
+  nM <- length(probabilities)
+  stopifnot(nM >= 2, all(is.finite(probabilities)), all(probabilities > 0),
+            abs(sum(probabilities) - 1) < 1e-8,
+            all(baselinemean %in% seq_len(nF)))
+  fixed <- matrix(FALSE, nM, nF)
+  fixed[nM, baselinemean] <- TRUE
+  stopifnot(length(free_means) == sum(!fixed))
+  means <- matrix(0, nM, nF)
+  means[!fixed] <- free_means
+  if (length(baselinemean)) {
+    means[nM, baselinemean] <- -colSums(sweep(
+      means[seq_len(nM - 1), baselinemean, drop=FALSE], 1,
+      probabilities[seq_len(nM - 1)], "*")) / probabilities[nM]
+  }
+  means
+}
+
+estim.meas.model <- function(y, nM, nF, freelambda, mstep.start, param.start, conv, freeconstant, constparam, baseline, baselinelambda, baselinemean, preserve_mean_indices=integer(0), loading_ties=list(), constant_ties=list()){
 
   
 ###############################################################
@@ -79,8 +100,8 @@ for (m in 1:nM){
   # If they have some NA, do the step only over the non-missing values - need to adjust the variances and means   
    
   } else if (length(comp[[i]])<nZ){ 
-    Q <- ((1/(2*pi))^(length(comp[[i]])/2))*((1/det(make.positive.definite(sigma[[m]][comp[[i]],comp[[i]]])))^.5)
-    invsigma <- solve(make.positive.definite(sigma[[m]][comp[[i]],comp[[i]]]))
+    Q <- ((1/(2*pi))^(length(comp[[i]])/2))*((1/det(make.positive.definite(sigma[[m]][comp[[i]],comp[[i]], drop=FALSE])))^.5)
+    invsigma <- solve(make.positive.definite(sigma[[m]][comp[[i]],comp[[i]], drop=FALSE]))
     probi[i,m]  <-  prop[m]*Q*exp(-.5*t(y[i,comp[[i]]] - mean[m,comp[[i]]])%*%invsigma%*%(y[i,comp[[i]]] - mean[m,comp[[i]]]))
   }
   } 
@@ -193,7 +214,8 @@ return(mstep)
 ###############################################################
 # 1.1. Scan missing values 
 ###############################################################
-comp <- apply(y, 1, scanNA)
+# Keep one index vector per household, even when all rows have the same NA pattern.
+comp <- lapply(seq_len(nrow(y)), function(i) which(!is.na(y[i, ])))
 
 ###############################################################
 # 1.2. Initialize loop with mstep.start values 
@@ -252,8 +274,6 @@ startConst <- endLambda+1
 endConst   <- startConst - 1 + nConst
 
 
-meanlong <- matrix(0,nM,nF)
-meanlong[nM,baselinemean] <- 1
 
 ##############################################################
 # 2.2. Define function to optimize over 
@@ -278,14 +298,15 @@ covfactor_par[[m]] <- Lcovfactor_par[[m]] %*% t(Lcovfactor_par[[m]])
 # Means of the nM-1 mixtures 
 
 
-meanfactor_par <- matrix(0,nM,nF)
-meanfactor_par[which(meanlong==0)] <- param[startMean:endMean]
+meanfactor_par <- reconstruct_factor_means(
+  param[startMean:endMean], mstep[[3]], nF, baselinemean)
 
 # Factor loadings : this is tricky because we want to impose certain restrictions on the matrix of factor laodings 
 # To do this simply, we have a matrix that indicates 1 if the parameter is fixed to 1, 2 if the parameter is to be estimated, 0 otherwise
 
 lambdalong[which(freelambda==2)]  <- param[startLambda:endLambda]
 lambda_par  <- matrix(lambdalong, nZinst, nF)
+for (tie in loading_ties) lambda_par[tie[3], tie[4]] <- lambda_par[tie[1], tie[2]]
 
 
 # Constants : this is also tricky because we want to impose certain restrictions on the vector of constants 
@@ -293,6 +314,7 @@ lambda_par  <- matrix(lambdalong, nZinst, nF)
 # To do this simply, we have a matrix that indicates the fixed constant where applicable and 2 if the parameter is to be estimated
 const_par <- constparam
 const_par[which(freeconstant==2)]  <- param[startConst:endConst]
+for (tie in constant_ties) const_par[tie[2]] <- const_par[tie[1]]
 
 
 ############################################################## 
@@ -310,20 +332,13 @@ cov_hat1a	  <- cov_hat1[[m]]
 cov_hat[[m]]  <- cov_hat1a[1:nZinst,1:nZinst]
 }
 
-# Estimated means with growth (since constant_par is fixed for baseline and later age invariant measures, implicitly imposes mean zero at baseline)
+# Measurement means implied by the same factors that will be exported.
 mean_par      <- matrix(0, nM, nZinst)
 for (m in 1:(nM)){ 
 mean_par[m,] <- prop_hat[m]*const_par + prop_hat[m]*(lambda_par %*% as.matrix(meanfactor_par[m,]))
 }
 
 
-#Enforce zero factor means at baselines
-if (nM<3) {
-mean_par[nM,baseline]  <-  const_par[baseline]-( (rowSums(as.matrix(mean_par[1:(nM-1),baseline]))))
-}
-if (nM>2){
-mean_par[nM,baseline]  <- const_par[baseline]-( (colSums(as.matrix(mean_par[1:(nM-1),baseline]))))
-}
 
 
 
@@ -356,8 +371,15 @@ return(sos)
 # 3. Perform minimum distance estimator  
 ##############################################################
 
+lower_bounds <- c(rep(0, nZinst), rep(-Inf, length(param.start)-nZinst))
+# Fix the bridge orientation and avoid division by a zero proxy loading.
+for (tie in loading_ties) {
+  position <- match(tie[1] + (tie[2]-1L)*nZinst, which(freelambda==2))
+  lower_bounds[startLambda + position - 1L] <- 1e-6
+}
 out <- optim(param.start,mindistance, method=c("L-BFGS-B"), control = list(maxit = 20000),
-             lower=c(rep(0, nZinst), rep(-Inf, length(param.start)-nZinst)), upper=rep(Inf, length(param.start)))
+             lower=lower_bounds, upper=rep(Inf, length(param.start)))
+if (out$convergence != 0L || !is.finite(out$value)) stop("Measurement minimum-distance fit did not converge; no factors exported.")
 
 ##############################################################
 # 4. Organize output   
@@ -377,26 +399,26 @@ out <- optim(param.start,mindistance, method=c("L-BFGS-B"), control = list(maxit
 
   constant_est <- constparam
   constant_est[which(freeconstant==2)]  <- out$par[startConst:endConst]
+  for (tie in constant_ties) constant_est[tie[2]] <- constant_est[tie[1]]
 
   lambdalong[which(freelambda==2)]  <- out$par[startLambda:endLambda]
   lambda_est  <- matrix(lambdalong, nZinst, nF)
+  for (tie in loading_ties) lambda_est[tie[3], tie[4]] <- lambda_est[tie[1], tie[2]]
   
   meanall_est1 <- mstep[[1]]
   covinst_hat1 <- mstep[[2]] 
   prop_hat       <- mstep[[3]]
   
-  meanlong_est <- matrix(0,nM,nF)
-  meanlong_est[nM,baselinemean] <- 1
-  meanfactor_est <- matrix(0,nM,nF)
-  meanfactor_est[which(meanlong_est==0)] <- mean_est
-  meanfactor_est[nM,baselinemean]  <- (- 1 * rowSums(as.matrix(prop_hat[1:(nM-1)] * meanfactor_est[(1:(nM-1)),baselinemean]))/prop_hat[nM])
+  meanfactor_est <- reconstruct_factor_means(mean_est, prop_hat, nF, baselinemean)
 
   meanall_est <- matrix(0,nM,nF+ninst)
   for (m in 1:nM){
   meanall_est[m,1:nF]  <- meanfactor_est[m,1:nF]
   meanall_est[m,(nF+1):(nF+ninst)] <- meanall_est1[m,(nZ-ninst+1):nZ]
   }
-  for (j in (nF+1):(nF+ninst)){
+  # Log-dollar inputs have identified levels; centering them destroys their units.
+  # Retain the existing restrictions only for the other observed controls.
+  for (j in setdiff((nF+1):(nF+ninst), preserve_mean_indices)){
   meanall_est[nM,j]  <- - 1 * sum(prop_hat[1:(nM-1)] * meanall_est[1:(nM-1),j])/prop_hat[nM]
   }
 
@@ -409,8 +431,10 @@ out <- optim(param.start,mindistance, method=c("L-BFGS-B"), control = list(maxit
   covall_est2[1:nF,1:nF] <- covall_est1b
   for (z in 1:(nF+ninst)) {
   for (i in 1:ninst){
-  covall_est2[(nF+i),z] <- covall_est1a[(nZ-ninst+i),(instcovpull[z])]
-  covall_est2[z,(nF+i)] <- t(covall_est1a[(nZ-ninst+i),(instcovpull[z])])
+  # The period-3 proxy now has an estimated, not unit, loading.
+  proxy_loading <- if (z <= nF) lambda_est[instcovpull[z], z] else 1
+  covall_est2[(nF+i),z] <- covall_est1a[(nZ-ninst+i),(instcovpull[z])] / proxy_loading
+  covall_est2[z,(nF+i)] <- covall_est2[(nF+i),z]
   }
   }
   covall_est[[m]]  <- covall_est2

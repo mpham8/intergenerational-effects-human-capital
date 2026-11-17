@@ -3,3 +3,5 @@
 *.stswp
 parameter-estimation/Del_Boca_Replication/tau_workaround_dry_run_output/
 parameter-estimation/Del_Boca_Replication/tau_workaround_substantive_output/
+/parameter-estimation/Attanasio Replication/Our Most Recent Output/
+iehc-full-bootstrap-*/
